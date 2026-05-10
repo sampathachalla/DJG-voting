@@ -11,3 +11,4 @@ export * from "./firebaseUserService";
 export * from "./firebaseAuthService";
 export * from "./votingContractService";
 export * from "./privateVotingService";
+export * from "./walletActivityService";

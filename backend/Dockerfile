@@ -14,6 +14,6 @@ RUN cd backend && npm run build
 WORKDIR /app/backend
 
 ENV NODE_ENV=production
-EXPOSE 8080
+EXPOSE 8081
 
 CMD ["npm", "run", "start"]

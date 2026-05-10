@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { getContractConfig, hasVotingContractAddress } from "../../contracts/config";
 import { getEvents } from "../../services";
 import type { VotingEventMode, VotingEventSummary } from "../../types/voting";
@@ -98,7 +98,19 @@ const bucketCopy: Record<
   },
 };
 
+type ListMode = "voter" | "observe";
+
 export default function EventsListPage() {
+  const { pathname } = useLocation();
+  const listMode: ListMode = useMemo(() => {
+    if (pathname.startsWith("/observe")) {
+      return "observe";
+    }
+    return "voter";
+  }, [pathname]);
+
+  const eventsBasePath = listMode === "observe" ? "/observe/events" : "/vote/events";
+
   const { activeNetwork } = useWallet();
   const contractConfig = getContractConfig(activeNetwork);
   const hasContract = hasVotingContractAddress(activeNetwork);
@@ -136,20 +148,40 @@ export default function EventsListPage() {
   return (
     <PageShell>
       <div className="mx-auto max-w-6xl">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="text-sm uppercase tracking-[0.3em] text-cyan-700">On-chain elections</p>
-            <h1 className="mt-2 text-4xl font-black text-[#2e2646] md:text-5xl">Browse {contractConfig.networkLabel} voting events</h1>
+        {listMode === "observe" ? (
+          <div className="mb-4 rounded-xl border border-white/50 bg-white/50 p-4 text-sm text-[#463c63] shadow-sm backdrop-blur-xl">
+            <p className="font-semibold text-[#2e2646]">Observer mode</p>
+            <p className="mt-2 leading-relaxed">
+              Read-only view of events and on-chain totals. You do not need a wallet here. Use <span className="font-semibold">Vote</span> after signing in to
+              cast a ballot or join a private invite flow.
+            </p>
           </div>
-          <Link to="/events/new" className="rounded-full bg-[#8b46cd] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-purple-600/25 transition hover:bg-[#722eaa]">
-            Create event
-          </Link>
+        ) : null}
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-800">
+              {listMode === "observe" ? "Public observer" : "Voter"} · On-chain elections
+            </p>
+            <h1 className="mt-1.5 text-3xl font-black tracking-tight text-[#2e2646] md:text-4xl">
+              {listMode === "observe"
+                ? `Observe ${contractConfig.networkLabel} voting activity`
+                : `Browse ${contractConfig.networkLabel} voting events`}
+            </h1>
+          </div>
+          {listMode === "voter" ? (
+            <Link
+              to="/organize/events/new"
+              className="rounded-full border border-purple-300 bg-white/85 px-4 py-2.5 text-sm font-bold text-[#7d3bba] shadow-sm transition hover:bg-white"
+            >
+              Organize an event
+            </Link>
+          ) : null}
         </div>
 
-        {loading ? <p className="mt-8 text-[#514769]">Loading {contractConfig.networkLabel} events...</p> : null}
-        {error ? <p className="mt-8 rounded-[1.75rem] border border-red-300/50 bg-red-50/80 p-4 text-sm text-red-700 backdrop-blur-xl">{error}</p> : null}
+        {loading ? <p className="mt-5 text-sm text-[#514769]">Loading {contractConfig.networkLabel} events...</p> : null}
+        {error ? <p className="mt-5 rounded-xl border border-red-300/50 bg-red-50/80 p-3.5 text-sm text-red-700 backdrop-blur-md">{error}</p> : null}
         {!hasContract ? (
-          <div className="mt-8 rounded-[2rem] border border-amber-300/50 bg-amber-50/80 p-8 text-amber-900 shadow-[0_20px_50px_rgba(120,81,19,0.08)] backdrop-blur-xl">
+          <div className="mt-5 rounded-2xl border border-amber-300/50 bg-amber-50/85 p-5 text-amber-900 shadow-sm backdrop-blur-md md:p-6">
             <h2 className="text-xl font-black">Contract not configured yet</h2>
             <p className="mt-3 max-w-3xl text-sm leading-relaxed text-amber-800">
               Deploy the voting contract on {contractConfig.networkLabel} and set the matching contract address in your environment. Until then, this page will stay empty instead of throwing an error.
@@ -158,15 +190,15 @@ export default function EventsListPage() {
         ) : null}
 
         {!loading && !error && events.length === 0 && hasContract ? (
-          <div className="mt-8 rounded-[2rem] border border-white/40 bg-white/40 p-8 text-[#514769] shadow-[0_20px_60px_rgba(46,38,70,0.08)] backdrop-blur-xl">
+          <div className="mt-5 rounded-2xl border border-white/45 bg-white/45 p-5 text-sm text-[#514769] shadow-sm backdrop-blur-md md:p-6">
             No voting events exist on the configured contract yet.
           </div>
         ) : null}
 
         {!loading && !error && events.length > 0 ? (
-          <section className="mt-8">
-            <div className="rounded-[2rem] border border-white/40 bg-white/35 p-5 shadow-[0_24px_70px_rgba(46,38,70,0.10)] backdrop-blur-xl">
-              <div className="flex flex-wrap gap-3">
+          <section className="mt-6">
+            <div className="rounded-2xl border border-white/45 bg-white/45 p-3 shadow-sm backdrop-blur-xl md:p-4">
+              <div className="flex flex-wrap gap-2">
                 {(["ongoing", "upcoming", "ended"] as EventBucket[]).map((bucket) => {
                   const isActive = activeBucket === bucket;
 
@@ -175,10 +207,10 @@ export default function EventsListPage() {
                       key={bucket}
                       type="button"
                       onClick={() => setActiveBucket(bucket)}
-                      className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+                      className={`rounded-full px-3 py-1.5 text-sm font-bold transition ${
                         isActive
-                          ? "bg-[#8b46cd] text-white shadow-lg shadow-purple-600/20"
-                          : "border border-purple-300 bg-white/70 text-[#7d3bba]"
+                          ? "bg-[#8b46cd] text-white shadow-sm shadow-purple-600/15"
+                          : "border border-purple-300 bg-white/75 text-[#7d3bba]"
                       }`}
                     >
                       {bucketCopy[bucket].label} ({bucketEvents[bucket].length})
@@ -188,24 +220,24 @@ export default function EventsListPage() {
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-between">
+            <div className="mt-4 flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-black text-[#2e2646]">{currentBucket.heading}</h2>
-                <p className="mt-1 text-sm text-[#5c5277]">{currentBucket.description}</p>
+                <h2 className="text-xl font-black tracking-tight text-[#2e2646] md:text-2xl">{currentBucket.heading}</h2>
+                <p className="mt-0.5 text-sm text-[#5c5277]">{currentBucket.description}</p>
               </div>
-              <span className="rounded-full bg-white/70 px-4 py-2 text-xs font-bold uppercase tracking-[0.2em] text-[#5c5277]">
+              <span className="shrink-0 rounded-full border border-white/50 bg-white/75 px-3 py-1.5 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-[#5c5277]">
                 {bucketEvents[activeBucket].length} events
               </span>
             </div>
 
             {bucketEvents[activeBucket].length === 0 ? (
-              <div className="mt-6 rounded-[2rem] border border-white/40 bg-white/40 p-8 text-[#514769] shadow-[0_20px_60px_rgba(46,38,70,0.08)] backdrop-blur-xl">
+              <div className="mt-4 rounded-2xl border border-white/45 bg-white/45 p-5 text-sm text-[#514769] shadow-sm backdrop-blur-md md:p-6">
                 {currentBucket.empty}
               </div>
             ) : (
-              <div className="mt-6 grid gap-6">
+              <div className="mt-4 grid gap-4">
                 {bucketEvents[activeBucket].map((event) => (
-                  <EventCard key={event.id} event={event} />
+                  <EventCard key={event.id} event={event} detailHref={`${eventsBasePath}/${event.id}`} />
                 ))}
               </div>
             )}
@@ -216,10 +248,10 @@ export default function EventsListPage() {
   );
 }
 
-function EventCard({ event }: { event: VotingEventSummary }) {
+function EventCard({ event, detailHref }: { event: VotingEventSummary; detailHref: string }) {
   return (
-    <article className="rounded-[2rem] border border-white/40 bg-white/40 p-6 shadow-[0_24px_70px_rgba(46,38,70,0.12)] backdrop-blur-xl">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+    <article className="rounded-2xl border border-white/45 bg-white/45 p-4 shadow-md shadow-[rgba(46,38,70,0.06)] backdrop-blur-xl md:p-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-3">
             <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">
@@ -232,15 +264,15 @@ function EventCard({ event }: { event: VotingEventSummary }) {
               {getEventStatus(event)}
             </span>
           </div>
-          <h2 className="mt-4 text-2xl font-black text-[#2e2646]">{event.title}</h2>
+          <h2 className="mt-3 text-xl font-black tracking-tight text-[#2e2646] md:text-2xl">{event.title}</h2>
           <p className="mt-2 max-w-3xl text-[#514769]">{event.description}</p>
         </div>
-        <Link to={`/events/${event.id}`} className="rounded-full border border-purple-300 bg-white/70 px-4 py-2 text-sm font-bold text-[#7d3bba] transition hover:bg-white">
+        <Link to={detailHref} className="rounded-full border border-purple-300 bg-white/70 px-4 py-2 text-sm font-bold text-[#7d3bba] transition hover:bg-white">
           Open event
         </Link>
       </div>
 
-      <dl className="mt-6 grid gap-4 text-sm md:grid-cols-4">
+      <dl className="mt-4 grid gap-3 text-sm md:grid-cols-4">
         <Meta label="Creator" value={event.creator} />
         <Meta label="Starts" value={formatDate(event.startTime)} />
         <Meta label="Ends" value={formatDate(event.endTime)} />
@@ -261,11 +293,17 @@ function Meta({ label, value }: { label: string; value: string }) {
 
 function PageShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#e0eff0] px-6 py-10 text-[#2e2646] md:px-12">
+    <div className="relative min-h-full overflow-x-hidden bg-[#e0eff0] px-4 py-6 text-[#2e2646] md:px-8 md:py-7">
       <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, #dceef4 0%, #b8cde4 25%, #cbcae4 70%, #9fcce1 100%)" }} />
       <div className="absolute top-[-140px] left-[-220px] h-[760px] w-[760px] rounded-full bg-purple-300/70 blur-[140px] mix-blend-multiply" />
       <div className="absolute bottom-[-140px] right-[-180px] h-[560px] w-[560px] rounded-full bg-teal-200/80 blur-[120px] mix-blend-multiply" />
-      <div className="absolute inset-0 opacity-15" style={{ backgroundImage: "linear-gradient(#4d5a8c 1px, transparent 1px), linear-gradient(90deg, #4d5a8c 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
+      <div
+        className="absolute inset-0 opacity-[0.06]"
+        style={{
+          backgroundImage: "linear-gradient(#4d5a8c 1px, transparent 1px), linear-gradient(90deg, #4d5a8c 1px, transparent 1px)",
+          backgroundSize: "48px 48px",
+        }}
+      />
       <div className="relative">{children}</div>
     </div>
   );

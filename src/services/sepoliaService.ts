@@ -1,21 +1,56 @@
-import { BrowserProvider, ethers } from "ethers";
-import { getChainSwitchParams, getContractConfig, getDefaultTestnet, getTestnetDefinition, hasCustomRpcUrl } from "../contracts/config";
+import { ethers } from "ethers";
+import {
+  getChainSwitchParams,
+  getContractConfig,
+  getDefaultTestnet,
+  getSepoliaReadRpcUrlCandidates,
+  getTestnetDefinition,
+  hasCustomRpcUrl,
+} from "../contracts/config";
 import type { AppTestnet } from "../types/voting";
+import {
+  getMetaMaskEip1193Provider,
+  getRememberedMetaMaskProvider,
+  rememberMetaMaskProvider,
+  type Eip1193Ethereum,
+} from "./metaMaskProvider";
 
-const providers = new Map<AppTestnet, ethers.JsonRpcProvider>();
+const providers = new Map<AppTestnet, ethers.Provider>();
 
 export const getActiveTestnet = (network?: AppTestnet): AppTestnet => network ?? getDefaultTestnet();
 
-export const getRpcProvider = (network: AppTestnet = getDefaultTestnet()): ethers.JsonRpcProvider => {
+function createReadProvider(network: AppTestnet): ethers.Provider {
+  const definition = getTestnetDefinition(network);
+
+  if (network === "sepolia") {
+    const urls = getSepoliaReadRpcUrlCandidates();
+    if (urls.length === 1) {
+      const provider = new ethers.JsonRpcProvider(urls[0], definition.chainId, { staticNetwork: true });
+      provider.pollingInterval = 15000;
+      return provider;
+    }
+
+    const configs = urls.map((url) => {
+      const provider = new ethers.JsonRpcProvider(url, definition.chainId, { staticNetwork: true });
+      provider.pollingInterval = 15000;
+      return { provider, weight: 1, stallTimeout: 2000 };
+    });
+
+    return new ethers.FallbackProvider(configs, definition.chainId, { quorum: 1 });
+  }
+
+  const provider = new ethers.JsonRpcProvider(definition.rpcUrl, definition.chainId, {
+    staticNetwork: true,
+  });
+  provider.pollingInterval = 15000;
+  return provider;
+}
+
+export const getRpcProvider = (network: AppTestnet = getDefaultTestnet()): ethers.Provider => {
   const resolvedNetwork = getActiveTestnet(network);
 
   if (!providers.has(resolvedNetwork)) {
-    const definition = getTestnetDefinition(resolvedNetwork);
-    const provider = new ethers.JsonRpcProvider(definition.rpcUrl, definition.chainId, {
-      staticNetwork: true,
-    });
-    provider.pollingInterval = 15000;
-    providers.set(resolvedNetwork, provider);
+    providers.set(resolvedNetwork, createReadProvider(resolvedNetwork));
   }
 
   return providers.get(resolvedNetwork)!;
@@ -56,15 +91,11 @@ export const isSignerOnTestnet = async (
   }
 };
 
-export const switchMetaMaskToTestnet = async (network: AppTestnet): Promise<void> => {
-  if (!window.ethereum) {
-    throw new Error("MetaMask is not available in this browser.");
-  }
-
+export const switchInjectedWalletToTestnet = async (ethereum: Eip1193Ethereum, network: AppTestnet): Promise<void> => {
   const { chainId, ...chainParams } = getChainSwitchParams(network);
 
   try {
-    await window.ethereum.request?.({
+    await ethereum.request({
       method: "wallet_switchEthereumChain",
       params: [{ chainId }],
     });
@@ -75,11 +106,17 @@ export const switchMetaMaskToTestnet = async (network: AppTestnet): Promise<void
       throw switchError;
     }
 
-    await window.ethereum.request?.({
+    await ethereum.request({
       method: "wallet_addEthereumChain",
       params: [{ chainId, ...chainParams }],
     });
   }
+};
+
+export const switchMetaMaskToTestnet = async (network: AppTestnet): Promise<void> => {
+  const ethereum = getRememberedMetaMaskProvider() ?? (await getMetaMaskEip1193Provider());
+  rememberMetaMaskProvider(ethereum);
+  await switchInjectedWalletToTestnet(ethereum, network);
 };
 
 export const getExplorerTxUrl = (transactionHash: string, network: AppTestnet = getDefaultTestnet()): string => {
@@ -96,21 +133,15 @@ export const getCurrentTokenSymbol = (network: AppTestnet): string => getContrac
 
 export const getCurrentChainId = (network: AppTestnet): number => getContractConfig(network).chainId;
 
-export const getBrowserProvider = (): BrowserProvider => {
-  if (!window.ethereum) {
-    throw new Error("MetaMask is not available in this browser.");
-  }
-
-  return new BrowserProvider(window.ethereum);
-};
-
 export const disconnectMetaMaskSite = async (): Promise<void> => {
-  if (!window.ethereum?.request) {
+  const ethereum = getRememberedMetaMaskProvider() ?? (window.ethereum as Eip1193Ethereum | undefined);
+
+  if (!ethereum?.request) {
     return;
   }
 
   try {
-    await window.ethereum.request({
+    await ethereum.request({
       method: "wallet_revokePermissions",
       params: [{ eth_accounts: {} }],
     });

@@ -1,6 +1,6 @@
 import type { JsonRpcSigner } from "ethers";
 
-export type WalletSource = "internal" | "metamask";
+export type WalletSource = "internal" | "metamask" | "coinbase";
 export type AppTestnet = "sepolia" | "amoy";
 
 export interface LocalAccountRecord {
@@ -44,9 +44,9 @@ export interface VotingProposal {
   voteCounts: string[];
 }
 
+/** On-chain we only learn whether this wallet voted; the contract does not expose which option was chosen. */
 export interface VoteRecord {
   hasVoted: boolean;
-  optionIndex: number | null;
 }
 
 export interface CreateProposalInput {

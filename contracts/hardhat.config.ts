@@ -17,7 +17,8 @@ const config: HardhatUserConfig = {
   },
   networks: {
     sepolia: {
-      url: process.env.VITE_SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
+      // Default: PublicNode public Sepolia JSON-RPC (POST JSON-RPC to URL root). Override via VITE_SEPOLIA_RPC_URL or use Infura/Alchemy.
+      url: process.env.VITE_SEPOLIA_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com",
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
     },
     amoy: {

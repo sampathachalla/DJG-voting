@@ -1,10 +1,11 @@
-import { firestore } from "../firebaseAdmin.js";
 import { HttpError } from "../errors.js";
+import { readPrivateVotingStore, runPrivateVotingStoreTransaction } from "../privateVotingStore.js";
 import type { InviteRecord, PrivateEventRecord, RegistrationRecord } from "../types.js";
 import { buildEventKey, generateOpaqueToken, hashOpaqueToken, normalizeAddress, nowIso } from "../utils/crypto.js";
 import { assertSignedByWallet, buildInviteCreationMessage, buildRegistrationMessage } from "../utils/signature.js";
 import {
   authorizePrivateEventVoter,
+  canWalletVoteInSepoliaEvent,
   getSepoliaEventProposals,
   getSepoliaEventSnapshot,
   type OnChainEventSnapshot,
@@ -16,10 +17,10 @@ const collections = {
   registrations: "privateVotingRegistrations",
 } as const;
 
-const eventRef = (eventKey: string) => firestore.collection(collections.events).doc(eventKey);
-const inviteRef = (eventKey: string, tokenHash: string) => firestore.collection(collections.invites).doc(`${eventKey}_${tokenHash}`);
-const registrationRef = (eventKey: string, walletAddress: string) =>
-  firestore.collection(collections.registrations).doc(`${eventKey}_${normalizeAddress(walletAddress)}`);
+const eventKeyForStore = (eventKey: string) => `${collections.events}:${eventKey}`;
+const inviteKeyForStore = (eventKey: string, tokenHash: string) => `${collections.invites}:${eventKey}_${tokenHash}`;
+const registrationKeyForStore = (eventKey: string, walletAddress: string) =>
+  `${collections.registrations}:${eventKey}_${normalizeAddress(walletAddress)}`;
 
 export interface CreatePrivateInvitesInput {
   eventId: number;
@@ -80,27 +81,6 @@ const buildPrivateEventRecord = (
   updatedAt,
 });
 
-const syncPrivateEventRecord = async (
-  contractAddress: string,
-  eventId: number,
-  organizerWalletHint?: string,
-): Promise<PrivateEventRecord | null> => {
-  const eventKey = buildEventKey(contractAddress, eventId);
-  const [snapshot, onChainEvent] = await Promise.all([
-    eventRef(eventKey).get(),
-    getSepoliaEventSnapshot(contractAddress, eventId),
-  ]);
-
-  if (!snapshot.exists) {
-    return null;
-  }
-
-  const existing = snapshot.data() as PrivateEventRecord;
-  const updated = buildPrivateEventRecord(contractAddress, eventId, eventKey, onChainEvent, organizerWalletHint ?? existing.organizerWallet, existing, nowIso());
-  await eventRef(eventKey).set(updated);
-  return updated;
-};
-
 export const createPrivateInvites = async (input: CreatePrivateInvitesInput) => {
   if (input.inviteCount < 1 || input.inviteCount > 500) {
     throw new HttpError(400, "Invite count must be between 1 and 500.");
@@ -115,13 +95,12 @@ export const createPrivateInvites = async (input: CreatePrivateInvitesInput) => 
 
   const inviteTokens = Array.from({ length: input.inviteCount }, () => generateOpaqueToken());
 
-  await firestore.runTransaction(async (transaction) => {
-    const eventSnapshot = await transaction.get(eventRef(eventKey));
-    const existing = eventSnapshot.exists ? (eventSnapshot.data() as Partial<PrivateEventRecord>) : null;
+  await runPrivateVotingStoreTransaction(async (state) => {
+    const existing = state.events[eventKeyForStore(eventKey)] ?? null;
 
     const eventRecord = buildPrivateEventRecord(input.contractAddress, input.eventId, eventKey, onChainEvent, input.organizerWallet, existing, issuedAt);
     eventRecord.inviteCount = (existing?.inviteCount ?? 0) + input.inviteCount;
-    transaction.set(eventRef(eventKey), eventRecord);
+    state.events[eventKeyForStore(eventKey)] = eventRecord;
 
     for (const inviteToken of inviteTokens) {
       const tokenHash = hashOpaqueToken(inviteToken);
@@ -131,6 +110,8 @@ export const createPrivateInvites = async (input: CreatePrivateInvitesInput) => 
         tokenHash,
         issuedByWallet: normalizeAddress(input.organizerWallet),
         expiresAt: input.expiresAt ?? null,
+        reservedAt: null,
+        reservedByWallet: null,
         usedAt: null,
         usedByWallet: null,
         authorizationTxHash: null,
@@ -138,7 +119,7 @@ export const createPrivateInvites = async (input: CreatePrivateInvitesInput) => 
         updatedAt: issuedAt,
       };
 
-      transaction.set(inviteRef(eventKey, tokenHash), record);
+      state.invites[inviteKeyForStore(eventKey, tokenHash)] = record;
     }
   });
 
@@ -158,41 +139,41 @@ export const registerWalletForPrivateEvent = async (input: RegisterWalletInput) 
   const message = buildRegistrationMessage(input);
   assertSignedByWallet(message, input.signature, input.walletAddress);
 
-  const [onChainEvent, existingEventSnapshot, existingInviteSnapshot, existingRegistrationSnapshot] = await Promise.all([
+  const [onChainEvent, store] = await Promise.all([
     getSepoliaEventSnapshot(input.contractAddress, input.eventId),
-    eventRef(eventKey).get(),
-    inviteRef(eventKey, inviteTokenHash).get(),
-    registrationRef(eventKey, walletAddress).get(),
+    readPrivateVotingStore(),
   ]);
+  const existingEvent = store.events[eventKeyForStore(eventKey)] ?? null;
+  const existingInvite = store.invites[inviteKeyForStore(eventKey, inviteTokenHash)] ?? null;
+  const existingRegistration = store.registrations[registrationKeyForStore(eventKey, walletAddress)] ?? null;
 
   if (onChainEvent.isPublic) {
     throw new HttpError(400, "This event is public and does not require invite-token registration.");
   }
 
-  if (!existingEventSnapshot.exists) {
+  if (!existingEvent) {
     throw new HttpError(404, "This private event has not been prepared in the backend yet. Create invite tokens first.");
   }
 
-  if (!existingInviteSnapshot.exists) {
+  if (!existingInvite) {
     throw new HttpError(404, "Invalid invite token.");
   }
 
-  if (existingRegistrationSnapshot.exists) {
-    const existingRegistration = existingRegistrationSnapshot.data() as RegistrationRecord;
-    return {
-      eventKey,
-      authorizationTxHash: existingRegistration.authorizationTxHash,
-      alreadyRegistered: true,
-    };
+  if (existingRegistration) {
+    if (existingRegistration.authorizationStatus === "authorized") {
+      return {
+        eventKey,
+        authorizationTxHash: existingRegistration.authorizationTxHash,
+        alreadyRegistered: true,
+      };
+    }
   }
 
-  const invite = existingInviteSnapshot.data() as InviteRecord;
-
-  if (invite.usedAt) {
+  if (existingInvite.usedAt) {
     throw new HttpError(409, "This invite token has already been used.");
   }
 
-  if (invite.expiresAt && Date.parse(invite.expiresAt) < Date.now()) {
+  if (existingInvite.expiresAt && Date.parse(existingInvite.expiresAt) < Date.now()) {
     throw new HttpError(410, "This invite token has expired.");
   }
 
@@ -201,57 +182,96 @@ export const registerWalletForPrivateEvent = async (input: RegisterWalletInput) 
     throw new HttpError(409, "The event proposals are not available on-chain yet. Try again in a moment.");
   }
 
-  const authorizationTxHash = await authorizePrivateEventVoter(input.contractAddress, input.eventId, walletAddress);
+  await runPrivateVotingStoreTransaction(async (state) => {
+    const eventRecord = state.events[eventKeyForStore(eventKey)];
+    const currentInvite = state.invites[inviteKeyForStore(eventKey, inviteTokenHash)];
+    const currentRegistration = state.registrations[registrationKeyForStore(eventKey, walletAddress)];
 
-  await firestore.runTransaction(async (transaction) => {
-    const [eventSnapshot, inviteSnapshot, registrationSnapshot] = await Promise.all([
-      transaction.get(eventRef(eventKey)),
-      transaction.get(inviteRef(eventKey, inviteTokenHash)),
-      transaction.get(registrationRef(eventKey, walletAddress)),
-    ]);
-
-    if (!eventSnapshot.exists) {
+    if (!eventRecord) {
       throw new HttpError(404, "This private event has not been prepared in the backend yet. Create invite tokens first.");
     }
 
-    if (!inviteSnapshot.exists) {
+    if (!currentInvite) {
       throw new HttpError(404, "Invalid invite token.");
     }
 
-    if (registrationSnapshot.exists) {
+    if (currentRegistration?.authorizationStatus === "authorized") {
       return;
     }
-
-    const currentInvite = inviteSnapshot.data() as InviteRecord;
 
     if (currentInvite.usedAt) {
       throw new HttpError(409, "This invite token has already been used.");
     }
 
+    if (currentInvite.reservedByWallet && currentInvite.reservedByWallet !== walletAddress) {
+      throw new HttpError(409, "This invite token is already being used by another wallet registration.");
+    }
+
     const registration: RegistrationRecord = {
-      id: registrationRef(eventKey, walletAddress).id,
+      id: `${eventKey}_${walletAddress}`,
       eventKey,
       walletAddress,
       inviteTokenHash,
       registeredAt,
+      authorizationStatus: "pending",
+      authorizationTxHash: null,
+      updatedAt: registeredAt,
+    };
+
+    state.registrations[registrationKeyForStore(eventKey, walletAddress)] = registration;
+    state.invites[inviteKeyForStore(eventKey, inviteTokenHash)] = {
+      ...currentInvite,
+      reservedAt: registeredAt,
+      reservedByWallet: walletAddress,
+      updatedAt: registeredAt,
+    };
+  });
+
+  const alreadyAuthorizedOnChain = await canWalletVoteInSepoliaEvent(input.contractAddress, input.eventId, walletAddress);
+  const authorizationTxHash = alreadyAuthorizedOnChain
+    ? existingRegistration?.authorizationTxHash ?? null
+    : await authorizePrivateEventVoter(input.contractAddress, input.eventId, walletAddress);
+
+  await runPrivateVotingStoreTransaction(async (state) => {
+    const eventRecord = state.events[eventKeyForStore(eventKey)];
+    const currentInvite = state.invites[inviteKeyForStore(eventKey, inviteTokenHash)];
+    const currentRegistration = state.registrations[registrationKeyForStore(eventKey, walletAddress)];
+
+    if (!eventRecord || !currentInvite || !currentRegistration) {
+      throw new HttpError(409, "Private registration state is incomplete. Retry the registration.");
+    }
+
+    if (currentRegistration.authorizationStatus === "authorized") {
+      return;
+    }
+
+    if (currentInvite.reservedByWallet && currentInvite.reservedByWallet !== walletAddress) {
+      throw new HttpError(409, "This invite token is already reserved for another wallet.");
+    }
+
+    state.registrations[registrationKeyForStore(eventKey, walletAddress)] = {
+      ...currentRegistration,
+      authorizationStatus: "authorized",
       authorizationTxHash,
       updatedAt: registeredAt,
     };
 
-    transaction.set(registrationRef(eventKey, walletAddress), registration);
-    transaction.update(inviteRef(eventKey, inviteTokenHash), {
+    state.invites[inviteKeyForStore(eventKey, inviteTokenHash)] = {
+      ...currentInvite,
+      reservedAt: null,
+      reservedByWallet: null,
       usedAt: registeredAt,
       usedByWallet: walletAddress,
       authorizationTxHash,
       updatedAt: registeredAt,
-    } satisfies Partial<InviteRecord>);
+    };
 
-    const eventRecord = eventSnapshot.data() as PrivateEventRecord;
-    transaction.update(eventRef(eventKey), {
+    state.events[eventKeyForStore(eventKey)] = {
+      ...eventRecord,
       usedInviteCount: eventRecord.usedInviteCount + 1,
       registeredWalletCount: eventRecord.registeredWalletCount + 1,
       updatedAt: registeredAt,
-    } satisfies Partial<PrivateEventRecord>);
+    };
   });
 
   return {
@@ -261,47 +281,28 @@ export const registerWalletForPrivateEvent = async (input: RegisterWalletInput) 
   };
 };
 
-export const submitAnonymousVote = async (_input: unknown) => {
-  throw new HttpError(410, "Private invite events now vote directly on Sepolia from the registered wallet.");
-};
-
 export const getPrivateEventSummary = async (contractAddress: string, eventId: number) => {
-  const record = await syncPrivateEventRecord(contractAddress, eventId);
+  const eventKey = buildEventKey(contractAddress, eventId);
+  const [store, onChainEvent] = await Promise.all([readPrivateVotingStore(), getSepoliaEventSnapshot(contractAddress, eventId)]);
 
-  if (!record) {
-    throw new HttpError(404, "No private voting backend record exists for this event yet.");
+  if (onChainEvent.isPublic) {
+    throw new HttpError(400, "Invite-token stats are only tracked for restricted (non-public) events.");
   }
 
-  return record;
-};
+  const existing = store.events[eventKeyForStore(eventKey)] ?? null;
+  const updatedAt = nowIso();
 
-export const getPrivateEventResults = async (contractAddress: string, eventId: number) => {
-  const [eventRecord, proposals] = await Promise.all([
-    syncPrivateEventRecord(contractAddress, eventId),
-    getSepoliaEventProposals(contractAddress, eventId),
-  ]);
-
-  if (!eventRecord) {
-    throw new HttpError(404, "No private voting backend record exists for this event yet.");
-  }
-
-  const tallies = proposals.reduce<Record<string, number>>((accumulator, proposal) => {
-    proposal.voteCounts.forEach((count, optionIndex) => {
-      accumulator[`${proposal.id}:${optionIndex}`] = count;
+  if (existing) {
+    const organizerWallet =
+      typeof existing.organizerWallet === "string" && existing.organizerWallet.trim().length > 0
+        ? existing.organizerWallet
+        : onChainEvent.creator;
+    const updated = buildPrivateEventRecord(contractAddress, eventId, eventKey, onChainEvent, organizerWallet, existing, updatedAt);
+    await runPrivateVotingStoreTransaction(async (state) => {
+      state.events[eventKeyForStore(eventKey)] = updated;
     });
-    return accumulator;
-  }, {});
+    return updated;
+  }
 
-  return {
-    event: eventRecord,
-    tallies,
-    totalVotes: proposals.reduce(
-      (sum, proposal) => sum + proposal.voteCounts.reduce((proposalSum, count) => proposalSum + count, 0),
-      0,
-    ),
-  };
-};
-
-export const getPrivateVoteTokenStatus = async (_contractAddress: string, _eventId: number, _voteToken: string) => {
-  throw new HttpError(410, "Private invite events now vote directly on Sepolia from the registered wallet.");
+  return buildPrivateEventRecord(contractAddress, eventId, eventKey, onChainEvent, onChainEvent.creator, null, updatedAt);
 };

@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import { ethers, JsonRpcSigner } from "ethers";
+import { BrowserProvider, ethers, JsonRpcSigner } from "ethers";
 import { getContractConfig, getDefaultTestnet } from "../contracts/config";
+import { disconnectCoinbaseWalletSession, getCoinbaseBrowserProvider, getCoinbaseWalletEip1193Provider, isCoinbaseConfiguredNetwork } from "../services/coinbaseWalletService";
 import { clearWalletSession, deleteLocalAccountByEmail, getLocalAccountByEmail, getWalletSession, saveWalletSession } from "../services/storageService";
 import { deleteCurrentFirebaseAuthUser, logoutFirebaseAuthUser } from "../services/firebaseAuthService";
 import { deleteFirebaseUserProfile } from "../services/firebaseUserService";
+import { clearRememberedMetaMaskProvider, getMetaMaskBrowserProvider } from "../services/metaMaskProvider";
 import {
   connectWalletToTestnet,
   disconnectMetaMaskSite,
-  getBrowserProvider,
   getTestnetBalance,
   hasCustomRpcForNetwork,
+  switchInjectedWalletToTestnet,
   switchMetaMaskToTestnet,
 } from "../services/sepoliaService";
 import { decryptPrivateKey, isValidPrivateKey } from "../services/walletService";
@@ -109,7 +111,7 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const connectMetaMask = async (): Promise<string> => {
-    const provider = getBrowserProvider();
+    const provider = await getMetaMaskBrowserProvider();
     await provider.send("eth_requestAccounts", []);
     const nextSigner = await provider.getSigner();
     const address = await nextSigner.getAddress();
@@ -124,6 +126,29 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
       {
         walletAddress: address,
         walletSource: "metamask",
+        activeNetwork,
+      },
+      nextSigner,
+    );
+
+    return address;
+  };
+
+  const connectCoinbaseWallet = async (): Promise<string> => {
+    const eip1193 = getCoinbaseWalletEip1193Provider();
+    await eip1193.request({ method: "eth_requestAccounts" });
+    const provider = getCoinbaseBrowserProvider();
+    const nextSigner = await provider.getSigner();
+    const address = await nextSigner.getAddress();
+
+    const chainId = await provider.send("eth_chainId", []);
+    const chainIdStr = typeof chainId === "string" ? chainId : String(chainId);
+    setIsCorrectNetwork(isCoinbaseConfiguredNetwork(activeNetwork, chainIdStr));
+
+    await setSession(
+      {
+        walletAddress: address,
+        walletSource: "coinbase",
         activeNetwork,
       },
       nextSigner,
@@ -160,7 +185,7 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
     if (walletSource === "metamask") {
       try {
         await switchMetaMaskToTestnet(network);
-        const provider = getBrowserProvider();
+        const provider = await getMetaMaskBrowserProvider();
         const nextSigner = await provider.getSigner();
         const nextAddress = await nextSigner.getAddress();
         await setSession(
@@ -175,11 +200,36 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
         setIsCorrectNetwork(false);
       }
     }
+
+    if (walletSource === "coinbase") {
+      try {
+        const eip1193 = getCoinbaseWalletEip1193Provider();
+        await switchInjectedWalletToTestnet(eip1193, network);
+        const provider = getCoinbaseBrowserProvider();
+        const nextSigner = await provider.getSigner();
+        const nextAddress = await nextSigner.getAddress();
+        await setSession(
+          {
+            walletAddress: nextAddress,
+            walletSource: "coinbase",
+            activeNetwork: network,
+          },
+          nextSigner,
+        );
+      } catch {
+        setIsCorrectNetwork(false);
+      }
+    }
   }, [setSession, walletAddress, walletSource]);
 
   const lockWallet = async (): Promise<void> => {
     if (walletSource === "metamask") {
       await disconnectMetaMaskSite();
+      clearRememberedMetaMaskProvider();
+    }
+
+    if (walletSource === "coinbase") {
+      await disconnectCoinbaseWalletSession();
     }
 
     try {
@@ -230,14 +280,8 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
       setActiveNetworkState(restoredNetwork);
 
       if (session.walletSource === "metamask") {
-        if (!window.ethereum) {
-          clearWalletSession();
-          setIsRestoringSession(false);
-          return;
-        }
-
         try {
-          const provider = getBrowserProvider();
+          const provider = await getMetaMaskBrowserProvider();
           const accounts = (await provider.send("eth_accounts", [])) as string[];
 
           if (!accounts.some((account) => account.toLowerCase() === session.walletAddress.toLowerCase())) {
@@ -246,6 +290,28 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
             return;
           }
 
+          const existingSigner = await provider.getSigner();
+          await setSession(session, existingSigner, { refreshState: false });
+        } catch {
+          clearWalletSession();
+        }
+
+        setIsRestoringSession(false);
+        return;
+      }
+
+      if (session.walletSource === "coinbase") {
+        try {
+          const eip1193 = getCoinbaseWalletEip1193Provider();
+          const accounts = (await eip1193.request({ method: "eth_accounts", params: [] })) as string[];
+
+          if (!accounts.some((account) => account.toLowerCase() === session.walletAddress.toLowerCase())) {
+            clearWalletSession();
+            setIsRestoringSession(false);
+            return;
+          }
+
+          const provider = new BrowserProvider(eip1193);
           const existingSigner = await provider.getSigner();
           await setSession(session, existingSigner, { refreshState: false });
         } catch {
@@ -298,6 +364,7 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
         isCorrectNetwork,
         unlockInternalWallet,
         connectMetaMask,
+        connectCoinbaseWallet,
         setActiveNetwork,
         refreshWalletState,
         lockWallet,

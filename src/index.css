@@ -2,6 +2,6 @@
 
 @layer components {
   .input {
-    @apply w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-white outline-none transition focus:border-cyan-300/40;
+    @apply w-full rounded-xl border border-white/10 bg-slate-950/70 px-3.5 py-2.5 text-white outline-none transition focus:border-cyan-300/40;
   }
 }

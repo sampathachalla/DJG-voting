@@ -14,7 +14,7 @@ const eventDocId = (network: AppTestnet, contractAddress: string, eventId: numbe
 export const upsertFirebaseUserProfile = async (profile: {
   email?: string | null;
   walletAddress: string;
-  walletSource?: "internal" | "metamask";
+  walletSource?: "internal" | "metamask" | "coinbase";
 }): Promise<void> => {
   const usersCollection = collection(getFirestoreDb(), "users");
   const normalizedEmail = profile.email?.trim().toLowerCase() || null;
@@ -57,7 +57,7 @@ export const getFirebaseUserProfile = async (email: string): Promise<FirebaseUse
   return {
     email: (data.email as string | null | undefined) ?? null,
     walletAddress: data.walletAddress as string,
-    walletSource: (data.walletSource as "internal" | "metamask" | undefined) ?? "internal",
+    walletSource: (data.walletSource as "internal" | "metamask" | "coinbase" | undefined) ?? "internal",
     createdAt: data.createdAt?.toDate?.()?.toISOString?.(),
     updatedAt: data.updatedAt?.toDate?.()?.toISOString?.(),
   };

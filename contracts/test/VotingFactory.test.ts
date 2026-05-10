@@ -54,7 +54,7 @@ describe("VotingFactory", () => {
     ).to.be.revertedWith("Invalid event window");
   });
 
-  it("stores public vote choices and blocks double voting", async () => {
+  it("records participation without storing the ballot choice and blocks double voting", async () => {
     const { contract, creator, voter } = await deployFixture();
 
     const startTime = (await time.latest()) + 5;
@@ -72,14 +72,13 @@ describe("VotingFactory", () => {
     );
 
     await time.increaseTo(startTime + 1);
-    await contract.connect(voter).castVote(1, 1, 1);
+    await expect(contract.connect(voter).castVote(1, 1, 1)).to.emit(contract, "VoteCast").withArgs(1, 1);
 
     const proposals = await contract.getEventProposals(1);
     expect(proposals[0].voteCounts[1]).to.equal(1n);
 
-    const record = await contract.getVoteRecord(1, 1, voter.address);
-    expect(record.hasVoted).to.equal(true);
-    expect(record.optionIndex).to.equal(1);
+    const voted = await contract.getVoteRecord(1, 1, voter.address);
+    expect(voted).to.equal(true);
 
     await expect(contract.connect(voter).castVote(1, 1, 0)).to.be.revertedWith("Already voted");
   });
@@ -257,7 +256,7 @@ describe("VotingFactory", () => {
     expect(eventData.allowedVoterCount).to.equal(1n);
     expect(await contract.canVoteInEvent(1, voter.address)).to.equal(true);
 
-    await expect(contract.connect(voter).castVote(1, 1, 1)).to.emit(contract, "VoteCast");
+    await expect(contract.connect(voter).castVote(1, 1, 1)).to.emit(contract, "VoteCast").withArgs(1, 1);
   });
 
   it("allows the event creator to authorize a voter later", async () => {
@@ -298,5 +297,31 @@ describe("VotingFactory", () => {
     );
 
     await expect(contract.connect(voter).authorizeVoter(1, voter.address)).to.be.revertedWith("Not allowed");
+  });
+
+  it("lets the owner authorize a backend registrar wallet", async () => {
+    const { contract, creator, voter, owner } = await deployFixture();
+    const [, , registrar] = await ethers.getSigners();
+    const startTime = (await time.latest()) + 10;
+    const endTime = startTime + 3600;
+
+    await contract.connect(creator).createEvent(
+      [{ title: "Private proposal", description: "Choose", options: ["Yes", "No"] }],
+      "Registrar-managed private vote",
+      "Backend relayer can be delegated",
+      0,
+      startTime,
+      endTime,
+      false,
+      []
+    );
+
+    await expect(contract.connect(owner).setRegistrar(registrar.address, true))
+      .to.emit(contract, "RegistrarUpdated")
+      .withArgs(registrar.address, true);
+
+    await expect(contract.connect(registrar).authorizeVoter(1, voter.address))
+      .to.emit(contract, "VoterAuthorized")
+      .withArgs(1, voter.address, registrar.address);
   });
 });

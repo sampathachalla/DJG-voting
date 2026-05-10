@@ -42,10 +42,12 @@ contract VotingFactory {
     address public treasury;
     uint256 public eventCreationFeeWei;
     uint256 public eventCount;
+    mapping(address => bool) public registrars;
 
     mapping(uint256 => EventData) private eventsById;
     mapping(uint256 => mapping(uint256 => ProposalData)) private proposalsByEvent;
-    mapping(uint256 => mapping(uint256 => mapping(address => uint256))) private voteSelections;
+    /// @notice Per-proposal participation flag only; the chosen option is not stored so organizers cannot read ballots from state.
+    mapping(uint256 => mapping(uint256 => mapping(address => bool))) private hasVoted;
     mapping(uint256 => mapping(address => bool)) private allowedVotersByEvent;
     mapping(uint256 => address[]) private allowedVoterAddressesByEvent;
     mapping(uint256 => uint256[]) private proposalIdsByEvent;
@@ -53,9 +55,11 @@ contract VotingFactory {
 
     event EventCreated(uint256 indexed eventId, address indexed creator, uint8 mode);
     event EventDeleted(uint256 indexed eventId, address indexed actor);
-    event VoteCast(uint256 indexed eventId, uint256 indexed proposalId, address indexed voter, uint8 optionIndex);
+    /// @notice Emits no voter address or option so event-only indexers cannot link wallets to choices. Vote calldata is still public on-chain.
+    event VoteCast(uint256 indexed eventId, uint256 indexed proposalId);
     event VoterAuthorized(uint256 indexed eventId, address indexed voter, address indexed actor);
     event EventCreationFeeUpdated(uint256 feeWei);
+    event RegistrarUpdated(address indexed registrar, bool isAuthorized);
     event TreasuryUpdated(address treasuryAddress);
 
     modifier onlyOwner() {
@@ -65,6 +69,7 @@ contract VotingFactory {
 
     constructor(address treasuryAddress, uint256 creationFeeWei) {
         owner = msg.sender;
+        registrars[msg.sender] = true;
         // Default the treasury to the owner wallet unless a separate payout address is provided.
         treasury = treasuryAddress == address(0) ? msg.sender : treasuryAddress;
         eventCreationFeeWei = creationFeeWei;
@@ -79,6 +84,12 @@ contract VotingFactory {
     function setEventCreationFee(uint256 newFeeWei) external onlyOwner {
         eventCreationFeeWei = newFeeWei;
         emit EventCreationFeeUpdated(newFeeWei);
+    }
+
+    function setRegistrar(address registrar, bool isAuthorized) external onlyOwner {
+        require(registrar != address(0), "Registrar required");
+        registrars[registrar] = isAuthorized;
+        emit RegistrarUpdated(registrar, isAuthorized);
     }
 
     function createEvent(
@@ -180,7 +191,7 @@ contract VotingFactory {
         require(eventData.id != 0, "Event not found");
         require(!eventData.isPublic, "Event is public");
         require(voter != address(0), "Invalid voter");
-        require(msg.sender == eventData.creator || msg.sender == owner, "Not allowed");
+        require(msg.sender == eventData.creator || msg.sender == owner || registrars[msg.sender], "Not allowed");
 
         if (!allowedVotersByEvent[eventId][voter]) {
             allowedVotersByEvent[eventId][voter] = true;
@@ -202,14 +213,13 @@ contract VotingFactory {
         ProposalData storage proposal = proposalsByEvent[eventId][proposalId];
         require(proposal.exists, "Proposal not found");
         require(optionIndex < proposal.options.length, "Invalid option");
-        // A value of zero means "not voted yet"; stored selections are offset by one.
-        require(voteSelections[eventId][proposalId][msg.sender] == 0, "Already voted");
+        require(!hasVoted[eventId][proposalId][msg.sender], "Already voted");
 
         proposal.voteCounts[optionIndex] += 1;
         totalVotesByEvent[eventId] += 1;
-        voteSelections[eventId][proposalId][msg.sender] = optionIndex + 1;
+        hasVoted[eventId][proposalId][msg.sender] = true;
 
-        emit VoteCast(eventId, proposalId, msg.sender, optionIndex);
+        emit VoteCast(eventId, proposalId);
     }
 
     function getEvent(uint256 eventId) external view returns (EventData memory) {
@@ -238,14 +248,8 @@ contract VotingFactory {
         return result;
     }
 
-    function getVoteRecord(uint256 eventId, uint256 proposalId, address voter) external view returns (bool hasVoted, uint8 optionIndex) {
-        uint256 selection = voteSelections[eventId][proposalId][voter];
-
-        if (selection == 0) {
-            return (false, 0);
-        }
-
-        return (true, uint8(selection - 1));
+    function getVoteRecord(uint256 eventId, uint256 proposalId, address voter) external view returns (bool voted) {
+        return hasVoted[eventId][proposalId][voter];
     }
 
     function canVoteInEvent(uint256 eventId, address voter) external view returns (bool) {

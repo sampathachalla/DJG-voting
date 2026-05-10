@@ -17,6 +17,7 @@
     "contracts:deploy:amoy": "npm --prefix contracts run deploy:amoy"
   },
   "dependencies": {
+    "@coinbase/wallet-sdk": "^4.3.7",
     "@tailwindcss/vite": "^4.2.0",
     "crypto-js": "^4.2.0",
     "ethers": "^6.16.0",

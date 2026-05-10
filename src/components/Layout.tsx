@@ -1,186 +1,128 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useState } from 'react';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import logo from '../assets/logo.png';
 import { useWallet } from '../hooks/useWallet';
-import { getExplorerAddressUrl } from '../services';
 import { hasCustomRpcForNetwork } from '../services/sepoliaService';
-import { getContractConfig, getSupportedTestnets } from '../contracts/config';
-import { formatTokenAmount } from '../utils/formatAmount';
-import type { AppTestnet } from '../types/voting';
+import { getContractConfig } from '../contracts/config';
+import WalletRail from './WalletRail';
 
 type LayoutMode = 'marketing' | 'app';
 
 export default function Layout({ children, mode = 'marketing' }: { children: React.ReactNode; mode?: LayoutMode }) {
-    const { walletAddress, walletSource, email, signer, balance, activeNetwork, isCorrectNetwork, setActiveNetwork, refreshWalletState, lockWallet, deleteInternalAccount } = useWallet();
-    const isAppMode = mode === 'app';
+    const location = useLocation();
+    const { walletAddress, signer, activeNetwork, refreshWalletState } = useWallet();
+    const isAppShell = mode === 'app';
     const hasCustomRpc = hasCustomRpcForNetwork(activeNetwork);
-    const [isProfileOpen, setIsProfileOpen] = useState(false);
-    const [drawerActionError, setDrawerActionError] = useState('');
-    const { address: contractAddress, networkLabel, nativeTokenSymbol } = getContractConfig(activeNetwork);
+    const [isWalletRailOpen, setIsWalletRailOpen] = useState(false);
+    const { networkLabel } = getContractConfig(activeNetwork);
+
+    const pathname = location.pathname;
+    const isVoteArea = pathname.startsWith('/vote');
+    const isOrganizeArea = pathname.startsWith('/organize');
+    const isObserveArea = pathname.startsWith('/observe');
 
     useEffect(() => {
-        if (!isAppMode || !walletAddress || !hasCustomRpc) {
+        if (!isAppShell || !walletAddress || !hasCustomRpc) {
             return;
         }
 
         void refreshWalletState(walletAddress, signer);
-    }, [hasCustomRpc, isAppMode, refreshWalletState, signer, walletAddress]);
+    }, [hasCustomRpc, isAppShell, refreshWalletState, signer, walletAddress]);
 
-    const handleDrawerAction = async (): Promise<void> => {
-        setDrawerActionError('');
-
-        try {
-            if (walletSource === 'metamask') {
-                await lockWallet();
-                setIsProfileOpen(false);
-                return;
-            }
-
-            const confirmed = window.confirm(
-                'Delete this local account from this browser? This removes the saved wallet from this device. Make sure you have the recovery phrase first.',
-            );
-
-            if (!confirmed) {
-                return;
-            }
-
-            await deleteInternalAccount();
-            setIsProfileOpen(false);
-        } catch (actionError) {
-            setDrawerActionError(actionError instanceof Error ? actionError.message : 'Unable to complete this action.');
+    useLayoutEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
         }
-    };
+        if (window.matchMedia('(min-width: 1024px)').matches) {
+            /* eslint-disable react-hooks/set-state-in-effect */
+            setIsWalletRailOpen(true);
+            /* eslint-enable react-hooks/set-state-in-effect */
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+        // Close the mobile overlay on navigate; desktop width stays user-controlled.
+        if (window.matchMedia('(max-width: 1023px)').matches) {
+            /* eslint-disable react-hooks/set-state-in-effect */
+            setIsWalletRailOpen(false);
+            /* eslint-enable react-hooks/set-state-in-effect */
+        }
+    }, [pathname]);
+
+    const modeTabClass = (active: boolean): string =>
+        `rounded-full px-3 py-1.5 text-[0.7rem] font-bold tracking-[0.1em] transition ${
+            active ? 'bg-[#8b46cd] text-white shadow-sm shadow-purple-600/15' : 'text-[#514769] hover:text-[#7d3bba]'
+        }`;
 
     return (
-        <div className="min-h-screen bg-white font-sans text-gray-900 flex flex-col">
-            <header className={`sticky top-0 z-50 px-6 md:px-12 ${isAppMode ? 'bg-white/70 backdrop-blur-2xl border-b border-white/30' : 'bg-white shadow-[0_2px_15px_-3px_rgba(0,0,0,0.07)]'} `}>
-                <div className="mx-auto flex max-w-[1400px] items-center justify-between py-4">
-                <Link to={walletAddress ? "/dashboard" : "/"} className="flex items-center gap-2">
-                    <img src={logo} alt="DJG Voting Wallet Logo" className="h-16 w-auto object-contain" />
-                    <span className="font-bold text-2xl tracking-tighter text-[#1e1730] mt-1">VOTING</span>
+        <div
+            className={`bg-white font-sans text-gray-900 flex flex-col ${
+                isAppShell ? 'h-screen min-h-0 overflow-hidden' : 'min-h-screen'
+            }`}
+        >
+            <header
+                className={`shrink-0 sticky top-0 z-50 px-4 md:px-6 ${
+                    isAppShell ? 'bg-white/80 backdrop-blur-xl border-b border-[#e7e0f1]/80' : 'bg-white shadow-[0_1px_8px_-2px_rgba(46,38,70,0.06)]'
+                } `}
+            >
+                <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 py-3">
+                <Link to={walletAddress ? "/vote" : "/"} className="flex items-center gap-3">
+                    <img src={logo} alt="Vera Talley voting wallet" className="h-12 w-auto object-contain" />
+                    {isAppShell ? (
+                        <div className="flex flex-col leading-tight">
+                            <span className="font-black text-xl tracking-tight text-[#1e1730]">Vera Talley</span>
+                            <span className="text-[0.6rem] font-semibold uppercase tracking-[0.32em] text-[#7d3bba]">Voting suite</span>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col leading-tight">
+                            <span className="font-black text-xl tracking-tight text-[#1e1730]">Vera Talley</span>
+                            <span className="text-[0.55rem] font-semibold uppercase tracking-[0.32em] text-[#6a6284]">By DoJaGa</span>
+                        </div>
+                    )}
                 </Link>
 
-                {isAppMode ? (
-                    <div className="hidden lg:flex items-center gap-6">
-                        <nav className="flex items-center gap-8 text-[0.78rem] font-bold tracking-[0.18em] text-[#514769]">
-                            <Link to="/dashboard" className="hover:text-[#7d3bba] transition-colors">DASHBOARD</Link>
-                            <Link to="/events" className="hover:text-[#7d3bba] transition-colors">EVENTS</Link>
-                            <Link to="/events/new" className="hover:text-[#7d3bba] transition-colors">CREATE</Link>
+                {isAppShell ? (
+                    <div className="flex flex-1 flex-col items-stretch gap-3 lg:flex-row lg:items-center lg:justify-end">
+                        <nav className="order-last flex w-full justify-center lg:order-none lg:w-auto lg:justify-start">
+                            <div className="inline-flex flex-wrap items-center justify-center gap-0.5 rounded-full border border-[#e7e0f1] bg-white/70 p-0.5 shadow-sm backdrop-blur-md">
+                                <NavLink to="/vote" className={() => modeTabClass(isVoteArea)}>
+                                    VOTE
+                                </NavLink>
+                                <NavLink to="/organize/events/new" className={() => modeTabClass(isOrganizeArea)}>
+                                    ORGANIZE
+                                </NavLink>
+                                <NavLink to="/observe" className={() => modeTabClass(isObserveArea)}>
+                                    OBSERVE
+                                </NavLink>
+                            </div>
                         </nav>
-                        {walletAddress ? (
-                            <div className="rounded-full border border-white/40 bg-white/55 px-4 py-2 text-right shadow-[0_10px_24px_rgba(46,38,70,0.08)] backdrop-blur-xl">
-                                <p className="text-[0.62rem] font-bold uppercase tracking-[0.24em] text-[#6a6284]">{networkLabel} balance</p>
-                                <p className="mt-1 text-sm font-bold text-[#2e2646]">{`${formatTokenAmount(balance)} ${nativeTokenSymbol}`}</p>
-                            </div>
-                        ) : null}
-                        {walletAddress ? (
-                            <div className="relative">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsProfileOpen((current) => !current)}
-                                    className="flex h-11 w-11 items-center justify-center rounded-full bg-[#8b46cd] text-sm font-black text-white shadow-[0_14px_30px_rgba(125,59,186,0.28)] transition hover:bg-[#722eaa]"
-                                >
-                                    {email?.[0]?.toUpperCase() ?? walletAddress.slice(2, 3).toUpperCase()}
-                                </button>
-                                <div className={`fixed inset-0 z-[55] bg-[#2e2646]/18 backdrop-blur-[2px] transition ${isProfileOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`} onClick={() => setIsProfileOpen(false)} />
-                                <div className={`fixed inset-y-0 right-0 z-[60] flex h-screen w-[20vw] min-w-[320px] max-w-[420px] flex-col border-l border-white/40 bg-white/82 p-6 shadow-[-30px_0_80px_rgba(46,38,70,0.16)] backdrop-blur-2xl transition duration-200 ${isProfileOpen ? 'translate-x-0 opacity-100' : 'pointer-events-none translate-x-full opacity-0'}`}>
-                                    <div className="flex h-full flex-col">
-                                        <div className="border-b border-[#e7e0f1] pb-6">
-                                            <button
-                                                type="button"
-                                                onClick={() => setIsProfileOpen(false)}
-                                                className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#e7e0f1] bg-white/80 px-4 py-2 text-sm font-bold text-[#514769] transition hover:border-purple-300 hover:text-[#7d3bba]"
-                                            >
-                                                <span className="text-base leading-none">←</span>
-                                                <span>Back</span>
-                                            </button>
-                                            <div className="flex items-center gap-4">
-                                                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[#8b46cd] text-xl font-black text-white shadow-[0_14px_30px_rgba(125,59,186,0.22)]">
-                                                    {email?.[0]?.toUpperCase() ?? walletAddress.slice(2, 3).toUpperCase()}
-                                                </div>
-                                                <div>
-                                                    <p className="text-base font-semibold text-[#2e2646]">{email ?? "Wallet session"}</p>
-                                                    <p className="mt-1 text-xs uppercase tracking-[0.22em] text-[#6a6284]">{walletSource ?? "Connected wallet"}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div className="mt-6 space-y-5 overflow-y-auto pr-1 text-sm">
-                                            <DrawerSection title="Current session">
-                                                <div className="space-y-4">
-                                                    <DrawerRow label="Email" value={email ?? "MetaMask session"} />
-                                                    <DrawerRow label="Can create event" value="Yes" />
-                                                    <DrawerRow label="Contract address" value={contractAddress || `Add the ${networkLabel} contract address in .env`} />
-                                                    <div>
-                                                        <p className="text-[0.68rem] uppercase tracking-[0.28em] text-[#6a6284]">Active network</p>
-                                                        <select
-                                                            value={activeNetwork}
-                                                            onChange={(event) => void setActiveNetwork(event.target.value as AppTestnet)}
-                                                            className="mt-2 w-full rounded-2xl border border-[#e7e0f1] bg-white/90 px-3 py-3 font-semibold text-[#2e2646] outline-none transition focus:border-purple-300"
-                                                        >
-                                                            {getSupportedTestnets().map((network) => (
-                                                                <option key={network} value={network}>
-                                                                    {getContractConfig(network).networkLabel}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                </div>
-                                            </DrawerSection>
-
-                                            <DrawerSection title="Wallet address">
-                                                <DropdownRow label="Explorer" value={walletAddress} href={getExplorerAddressUrl(walletAddress, activeNetwork)} />
-                                            </DrawerSection>
-
-                                            <DrawerSection title="Wallet details">
-                                                <div className="space-y-4">
-                                                    <DrawerRow label={`${networkLabel} balance`} value={`${formatTokenAmount(balance)} ${nativeTokenSymbol}`} />
-                                                    <DrawerRow label="Network" value={isCorrectNetwork ? networkLabel : `Switch to ${networkLabel}`} />
-                                                    <DrawerRow label="Session type" value={walletSource ?? "Connected wallet"} />
-                                                </div>
-                                            </DrawerSection>
-                                        </div>
-
-                                        {drawerActionError ? (
-                                            <p className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                                                {drawerActionError}
-                                            </p>
-                                        ) : null}
-
-                                        <div className="mt-6 space-y-3">
-                                            <button
-                                                onClick={() => {
-                                                    setDrawerActionError('');
-                                                    void lockWallet().then(() => setIsProfileOpen(false));
-                                                }}
-                                                className="w-full rounded-full bg-[#8b46cd] px-4 py-3 text-sm font-bold text-white shadow-lg shadow-purple-600/25 transition hover:bg-[#722eaa]"
-                                            >
-                                                Logout
-                                            </button>
-                                            <button
-                                                onClick={() => void handleDrawerAction()}
-                                                className="w-full rounded-full border border-red-200 bg-white px-4 py-3 text-sm font-bold text-red-600 transition hover:bg-red-50"
-                                            >
-                                                {walletSource === 'metamask' ? 'Disconnect MetaMask' : 'Delete account'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : null}
+                        <div className="flex flex-wrap items-center justify-end gap-2 lg:gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setIsWalletRailOpen((current) => !current)}
+                                className="rounded-full border border-[#e7e0f1] bg-white/90 px-3 py-2 text-[0.7rem] font-bold tracking-[0.12em] text-[#514769] shadow-sm transition hover:border-purple-300 hover:text-[#7d3bba]"
+                                aria-expanded={isWalletRailOpen}
+                                aria-controls="wallet-rail-panel"
+                            >
+                                {isWalletRailOpen ? 'HIDE WALLET' : 'WALLET'}
+                            </button>
+                        </div>
                     </div>
                 ) : (
                     <nav className="hidden lg:flex items-center gap-10 text-[0.85rem] font-bold tracking-[0.15em] text-[#333]">
                         <Link to="/features" className="hover:text-[#7d3bba] transition-colors">FEATURES</Link>
                         <Link to="/security" className="hover:text-[#7d3bba] transition-colors">SECURITY</Link>
                         <Link to="/support" className="hover:text-[#7d3bba] transition-colors">SUPPORT</Link>
-                        <Link to={walletAddress ? "/dashboard" : "/login"} className="bg-[#8b46cd] hover:bg-[#722eaa] text-white px-8 py-3.5 rounded-full transition-colors ml-4 shadow-lg shadow-purple-600/30">
-                            {walletAddress ? "DASHBOARD" : "GET STARTED"}
+                        <Link to={walletAddress ? "/vote" : "/login"} className="bg-[#8b46cd] hover:bg-[#722eaa] text-white px-8 py-3.5 rounded-full transition-colors ml-4 shadow-lg shadow-purple-600/30">
+                            {walletAddress ? "OPEN APP" : "GET STARTED"}
                         </Link>
                     </nav>
                 )}
 
-                <button className="lg:hidden text-gray-800 p-2">
+                <button type="button" className="lg:hidden text-gray-800 p-2" aria-label="Menu">
                     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
                     </svg>
@@ -188,25 +130,72 @@ export default function Layout({ children, mode = 'marketing' }: { children: Rea
                 </div>
             </header>
 
-            <main className="flex-grow">
-                {isAppMode && !hasCustomRpc ? (
-                    <div className="px-6 pt-6 md:px-12">
-                        <div className="mx-auto max-w-[1400px] rounded-[1.5rem] border border-amber-200 bg-amber-50/95 px-5 py-4 text-sm text-amber-900 shadow-[0_18px_50px_rgba(120,83,24,0.08)] backdrop-blur-xl">
+            {isAppShell ? (
+                <div className="flex min-h-0 flex-1 flex-col bg-gradient-to-br from-[#eef4f7] via-[#f0eaf8] to-[#e6f0f4]">
+                    {!hasCustomRpc ? (
+                        <div className="px-4 pt-3 md:px-5">
+                            <div className="mx-auto max-w-[1600px] rounded-xl border border-amber-200 bg-amber-50/95 px-4 py-3 text-sm text-amber-900 shadow-sm backdrop-blur-md">
                                 <p className="font-semibold">RPC not configured.</p>
                                 <p className="mt-1">
-                                Add the RPC URL for {networkLabel} to your <code>.env</code> file to load balance and contract status without public rate limits.
+                                    Add the RPC URL for {networkLabel} to your <code>.env</code> file to load balance and contract status without public rate limits.
                                 </p>
                             </div>
                         </div>
-                ) : null}
-                {children}
-            </main>
+                    ) : null}
 
-            {isAppMode ? null : <footer className="bg-[#1e1730] text-gray-300 py-16 px-6 md:px-12 border-t-[8px] border-[#7d3bba] mt-auto">
+                    <div
+                        className={`relative mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col gap-3 px-4 py-3 md:px-5 lg:flex-row lg:items-stretch lg:gap-5 lg:px-5 lg:py-4 lg:overflow-hidden ${
+                            isWalletRailOpen ? 'lg:justify-between' : ''
+                        }`}
+                    >
+                        {isWalletRailOpen ? (
+                            <div
+                                className="fixed inset-0 z-[35] bg-[#2e2646]/18 backdrop-blur-[2px] transition lg:hidden"
+                                onClick={() => setIsWalletRailOpen(false)}
+                                aria-hidden
+                            />
+                        ) : null}
+                        <main
+                            className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden transition-[max-width] duration-300 ease-out ${
+                                isWalletRailOpen
+                                    ? 'lg:max-w-[min(56rem,calc(100%-22rem))] lg:flex-[1_1_auto] lg:shrink'
+                                    : 'lg:max-w-none'
+                            }`}
+                        >
+                            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain rounded-2xl border border-white/50 bg-gradient-to-br from-[#eef4f7] via-[#f0eaf8] to-[#e6f0f4] shadow-md shadow-[rgba(46,38,70,0.08)] backdrop-blur-xl [-webkit-overflow-scrolling:touch]">
+                                <div className="flex min-h-full min-w-0 flex-col">{children}</div>
+                            </div>
+                        </main>
+                        <div
+                            id="wallet-rail-panel"
+                            className={`flex min-h-0 min-w-0 flex-col overscroll-contain transition-[width,max-width,opacity] duration-300 ease-out [-webkit-overflow-scrolling:touch] lg:shrink-0 ${
+                                isWalletRailOpen
+                                    ? 'fixed inset-y-0 right-0 z-40 w-full max-w-[360px] overflow-y-auto border-l border-[#e7e0f1] bg-white/95 shadow-lg backdrop-blur-xl lg:relative lg:inset-auto lg:right-auto lg:z-auto lg:w-[340px] lg:max-w-[360px] lg:border-0 lg:bg-transparent lg:shadow-none lg:opacity-100 lg:pointer-events-auto'
+                                    : 'hidden overflow-hidden lg:flex lg:w-0 lg:max-w-0 lg:overflow-hidden lg:border-0 lg:bg-transparent lg:opacity-0 lg:pointer-events-none lg:shadow-none'
+                            }`}
+                        >
+                            <div className="min-h-0 min-w-0 p-3 lg:p-0">
+                                <WalletRail />
+                            </div>
+                        </div>
+                    </div>
+
+                    <footer className="shrink-0 border-t border-[#e7e0f1]/80 bg-white/70 px-4 py-2 text-center text-[0.65rem] uppercase tracking-[0.24em] text-[#6a6284] backdrop-blur-md md:px-8">
+                        Vera Talley · operated by DoJaGa · on-chain voting on Sepolia
+                    </footer>
+                </div>
+            ) : (
+                <main className="flex-grow">{children}</main>
+            )}
+
+            {isAppShell ? null : <footer className="bg-[#1e1730] text-gray-300 py-16 px-6 md:px-12 border-t-[8px] border-[#7d3bba] mt-auto">
                 <div className="max-w-[1400px] mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
-                    <div className="flex items-center gap-2">
-                        <img src={logo} alt="DJG Voting Wallet Logo" className="h-16 w-auto object-contain brightness-0 invert" />
-                        <span className="font-bold text-2xl ml-1 text-white mt-1">VOTING</span>
+                    <div className="flex items-center gap-3">
+                        <img src={logo} alt="Vera Talley voting wallet" className="h-14 w-auto object-contain brightness-0 invert" />
+                        <div className="flex flex-col leading-tight">
+                            <span className="font-black text-xl text-white">Vera Talley</span>
+                            <span className="text-[0.55rem] font-semibold uppercase tracking-[0.3em] text-gray-400">By DoJaGa</span>
+                        </div>
                     </div>
 
                     <div className="flex flex-wrap justify-center gap-8 font-medium">
@@ -217,38 +206,9 @@ export default function Layout({ children, mode = 'marketing' }: { children: Rea
                         <a href="#" className="hover:text-white transition-colors">Twitter X</a>
                     </div>
 
-                    <p className="text-sm">© 2026 DJG Voting Wallet.</p>
+                    <p className="text-sm">© 2026 DoJaGa · Vera Talley.</p>
                 </div>
             </footer>}
-        </div>
-    );
-}
-
-function DropdownRow({ label, value, href }: { label: string; value: string; href?: string }) {
-    const content = (
-        <div>
-            <p className="text-[0.68rem] uppercase tracking-[0.28em] text-[#6a6284]">{label}</p>
-            <p className="mt-1 break-all font-semibold leading-6 text-[#2e2646]">{value}</p>
-        </div>
-    );
-
-    return href ? <a href={href} target="_blank" rel="noreferrer" className="block transition hover:text-[#7d3bba]">{content}</a> : content;
-}
-
-function DrawerSection({ title, children }: { title: string; children: React.ReactNode }) {
-    return (
-        <section className="rounded-[1.5rem] border border-[#ece6f5] bg-white/75 p-4 shadow-[0_12px_32px_rgba(46,38,70,0.06)]">
-            <p className="text-[0.68rem] font-bold uppercase tracking-[0.28em] text-[#6a6284]">{title}</p>
-            <div className="mt-3">{children}</div>
-        </section>
-    );
-}
-
-function DrawerRow({ label, value }: { label: string; value: string }) {
-    return (
-        <div>
-            <p className="text-[0.68rem] uppercase tracking-[0.28em] text-[#6a6284]">{label}</p>
-            <p className="mt-1 break-all font-semibold leading-6 text-[#2e2646]">{value}</p>
         </div>
     );
 }

@@ -1,128 +1,24 @@
-# DoJaGa Voting
+# DoJaGa Wallet / DoJaGa Voting
 
-DoJaGa Voting is a Sepolia-first blockchain voting application with:
+> Full project overview: **[docs/PROJECT.md](docs/PROJECT.md)** — a contributor-focused tour of the repo layout, how the frontend, backend, and contracts connect, and the main features and routes.
 
-- a React frontend for wallet-based voting flows
-- a Hardhat smart contract workspace
-- an Express backend for private invite registration and on-chain voter authorization
+Sepolia-first web app for **wallet-based voting**: a React frontend talks to Ethereum Sepolia (via ethers), optional Firebase Auth, and an Express backend for **private invite registration** and on-chain voter authorization. Final votes are submitted on-chain; the backend does not define official vote totals.
 
-The current architecture is designed so final votes are submitted on-chain on Ethereum Sepolia. The backend helps with invite token generation and private-event registration, but it is not the source of truth for vote totals.
+The Hardhat workspace under `contracts/` deploys the `VotingFactory` contract used by the UI.
 
-## Current Architecture
+---
 
-### Frontend
+## Prerequisites
 
-The frontend lives in `src/` and provides:
+- **Node.js** (use a current LTS release).
+- **npm** (comes with Node).
+- Wallets and RPC access appropriate for **Sepolia** when exercising on-chain flows.
 
-- local non-custodial wallet creation
-- Firebase Authentication signup/login
-- MetaMask support
-- public event creation and voting
-- restricted event creation
-- private invite-event registration flow
+---
 
-For private invite events, the frontend sends the invite token to the backend, the backend authorizes that wallet on-chain, and the voter then casts the final vote directly from their wallet on Sepolia.
+## Quick start (full stack, local)
 
-### Smart Contract
-
-The Solidity contract lives in `contracts/contracts/VotingFactory.sol`.
-
-It supports:
-
-- creating voting events
-- public voting
-- restricted allowlist voting
-- later voter authorization for invite-based private events
-- one vote per wallet per proposal
-- optional treasury and event creation fee controls
-
-### Backend
-
-The backend lives in `backend/` and provides:
-
-- private invite token generation
-- invite-token registration
-- on-chain authorization of registered wallets for private events
-- private event summary/results endpoints backed by Sepolia state
-
-The backend requires a relayer wallet that is allowed to call `authorizeVoter` on the deployed contract. In the current setup, the simplest option is to use the contract owner key.
-
-## Project Structure
-
-```text
-src/
-  auth/                    Authentication screens
-  components/              Layout and route helpers
-  context/                 Wallet session state
-  contracts/               Frontend ABI/config
-  pages/                   Landing, dashboard, events
-  services/                Wallet, contract, Firebase, backend helpers
-
-backend/
-  src/                     Express API for private-event invite flows
-
-contracts/
-  contracts/               Solidity source
-  scripts/                 Hardhat deployment scripts
-  test/                    Contract tests
-```
-
-## Tech Stack
-
-- React 19
-- TypeScript
-- Vite
-- Tailwind CSS
-- Ethers v6
-- Firebase Authentication
-- Express
-- Firebase Admin / Firestore
-- Hardhat
-- Ethereum Sepolia
-
-## Environment Setup
-
-Copy `.env.example` to `.env` in the project root.
-
-Frontend and contract-related variables:
-
-```bash
-VITE_FIREBASE_API_KEY=
-VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=
-VITE_FIREBASE_STORAGE_BUCKET=
-VITE_FIREBASE_MESSAGING_SENDER_ID=
-VITE_FIREBASE_APP_ID=
-VITE_SEPOLIA_VOTING_CONTRACT_ADDRESS=
-VITE_VOTING_CONTRACT_ADDRESS=
-VITE_SEPOLIA_RPC_URL=
-VITE_SEPOLIA_BLOCK_EXPLORER_BASE_URL=https://sepolia.etherscan.io
-DEPLOYER_PRIVATE_KEY=0x...
-```
-
-Copy `backend/.env.example` to `backend/.env`.
-
-Backend variables:
-
-```bash
-PORT=8080
-BACKEND_ALLOWED_ORIGINS=http://localhost:5173
-SEPOLIA_RPC_URL=https://rpc.sepolia.org
-BACKEND_RELAYER_PRIVATE_KEY=0x...
-FIREBASE_PROJECT_ID=
-FIREBASE_CLIENT_EMAIL=
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-```
-
-Notes:
-
-- `VITE_SEPOLIA_VOTING_CONTRACT_ADDRESS` should point to the deployed contract.
-- `BACKEND_RELAYER_PRIVATE_KEY` should be a wallet permitted to authorize voters on the contract.
-- If you redeploy the contract after ABI changes, update both frontend and backend configuration.
-
-## Install
-
-Install dependencies in all workspaces:
+**1. Install dependencies** (root, backend, and contracts each have their own `package.json`):
 
 ```bash
 npm install
@@ -130,102 +26,131 @@ npm --prefix backend install
 npm --prefix contracts install
 ```
 
-## Development Commands
+**2. Environment files**
 
-Run the frontend:
+- Copy `.env.example` → `.env` in the **project root** (frontend, Vite, Hardhat deploy, shared fallbacks).
+- Copy `backend/.env.example` → `backend/.env` for the API.
 
-```bash
-npm run dev
-```
+**3. Run two terminals** from the repository root:
 
-Run the backend:
+| Terminal | Command | Purpose |
+|----------|---------|---------|
+| 1 | `npm run backend:dev` | Express API on **port 8081** (default). |
+| 2 | `npm run dev` | Vite frontend (default **5173**). |
 
-```bash
-npm run backend:dev
-```
-
-Build the frontend:
+**4. Verify the backend**
 
 ```bash
-npm run build
+curl -sS http://127.0.0.1:8081/health
 ```
 
-Build the backend:
+**5. Open the app** at the URL Vite prints (typically `http://localhost:5173`).
 
-```bash
-npm run backend:build
+### Vite `/api` proxy (development)
+
+In dev, Vite proxies **`/api/*`** to **`http://127.0.0.1:8081`**, so the browser can call the backend **same-origin** without CORS to another port. Leave **`VITE_PRIVATE_VOTING_API_URL` unset** in `.env` for that behavior (the example file documents this). Set it only when the API lives on another origin (for example production), and use a value that includes the `/api` prefix as required by the app.
+
+---
+
+## Environment variables (overview)
+
+### Root `.env` (frontend + deploy)
+
+| Area | Variables (representative) | Notes |
+|------|----------------------------|--------|
+| Firebase (client) | `VITE_FIREBASE_*` | Required for signup/login flows that use Firebase. |
+| Sepolia | `VITE_SEPOLIA_RPC_URL`, `VITE_SEPOLIA_VOTING_CONTRACT_ADDRESS`, `VITE_SEPOLIA_BLOCK_EXPLORER_BASE_URL` | RPC must accept **HTTP POST** with JSON-RPC; avoid URLs that return HTML. If you set a **custom** RPC (for example 1rpc.io) and hit **usage limits**, the UI automatically **falls back** to a public Sepolia endpoint for read-only calls (`ethers.FallbackProvider`). For reliable throughput, use Infura, Alchemy, or a paid RPC plan. |
+| Amoy (optional) | `VITE_AMOY_*` | Present for optional Polygon Amoy configuration. |
+| Legacy | `VITE_VOTING_CONTRACT_ADDRESS`, `VITE_BLOCK_EXPLORER_BASE_URL` | Fallbacks for older code paths; align with your deployed network if used. |
+| Private voting API | `VITE_PRIVATE_VOTING_API_URL` | Omit in local dev for same-origin `/api` via Vite proxy. |
+| Etherscan (optional) | `VITE_ETHERSCAN_API_KEY`, per-network overrides | Improves the in-app wallet activity rail; optional. |
+| Deploy | `DEPLOYER_PRIVATE_KEY` | Used by Hardhat when deploying from this repo (`contracts` reads `../.env`). |
+
+See `.env.example` for the full list and comments.
+
+### `backend/.env`
+
+Private voting API: Sepolia RPC, relayer key, CORS-related `BACKEND_ALLOWED_ORIGINS`, Firebase Admin fields for Firestore. The backend may fall back to `VITE_SEPOLIA_RPC_URL` or `DEPLOYER_PRIVATE_KEY` from the root `.env` when backend-specific keys are absent (non-overriding load). Details and a column reference table: **[backend/README.md](backend/README.md)**.
+
+After changing contract addresses or ABI, update frontend and backend configuration consistently.
+
+---
+
+## Useful scripts (root `package.json`)
+
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Vite dev server. |
+| `npm run build` | Typecheck and production build of the frontend. |
+| `npm run preview` | Preview the production build. |
+| `npm run backend:dev` | Backend in watch mode. |
+| `npm run backend:build` | Compile backend TypeScript. |
+| `npm run backend:start` | Run compiled backend (`node dist/index.js`). |
+| `npm run contracts:compile` | Hardhat compile. |
+| `npm run contracts:test` | Hardhat tests. |
+| `npm run contracts:deploy:sepolia` | Deploy to Sepolia (expects root `.env` with `DEPLOYER_PRIVATE_KEY` and RPC; Hardhat uses `VITE_SEPOLIA_RPC_URL` with a documented default in `hardhat.config.ts`). |
+| `npm run contracts:deploy:amoy` | Deploy to Amoy. |
+
+---
+
+## Project layout
+
+```text
+src/           React app (auth, wallet context, events UI, services)
+backend/       Express API for private invites and on-chain authorization
+contracts/     Hardhat: VotingFactory.sol, deploy scripts, tests
 ```
 
-Compile contracts:
+---
 
-```bash
-npm run contracts:compile
-```
+## Architecture (short)
 
-Run contract tests:
+- **Frontend** (`src/`): wallet connection (including MetaMask and Coinbase Wallet SDK paths), Firebase auth, event creation and voting UI, calls to Sepolia and to `/api` for private flows.
+- **Contracts** (`contracts/contracts/VotingFactory.sol`): creates events, public and restricted voting, invite-style private flows with later on-chain authorization, one vote per wallet per proposal, optional fees/treasury (see contract source for exact behavior).
+- **Backend** (`backend/`): invite issuance, registration, relayer-driven `authorizeVoter`, summaries/results from chain. **Deep backend setup, env table, and troubleshooting:** [backend/README.md](backend/README.md).
 
-```bash
-npm run contracts:test
-```
+---
 
-## Deploy To Sepolia
+## Main user flows
 
-Make sure the root `.env` contains:
+- **Public event:** Connect a wallet, create or open an event, vote on-chain on Sepolia.
+- **Restricted allowlist:** Organizer supplies allowed addresses; only those wallets can vote on-chain.
+- **Private invite:** Organizer creates invite tokens via the backend; a voter registers with a token; the backend authorizes the wallet on-chain; the voter casts the vote from that wallet.
 
-```bash
-VITE_SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/your_key
-DEPLOYER_PRIVATE_KEY=0x...
-```
+---
 
-Then deploy:
+## Deploying the contract to Sepolia
+
+Ensure root `.env` includes a funded testnet `DEPLOYER_PRIVATE_KEY` and a working `VITE_SEPOLIA_RPC_URL` (or rely on the Hardhat default documented in `contracts/hardhat.config.ts`). Then:
 
 ```bash
 npm run contracts:deploy:sepolia
 ```
 
-After deployment:
+Update `VITE_SEPOLIA_VOTING_CONTRACT_ADDRESS` (and any legacy `VITE_VOTING_CONTRACT_ADDRESS` you use) plus backend relayer permissions as needed, then restart frontend and backend.
 
-1. Confirm the deployed contract address was written into `.env`.
-2. Ensure the backend relayer wallet is authorized to call `authorizeVoter`.
-3. Restart the frontend and backend.
+---
 
-## Main User Flows
+## Ballot privacy (on-chain)
 
-### Public Event
+This project uses a **storage-and-logs** privacy posture, not full cryptographic anonymity:
 
-1. Connect a wallet.
-2. Create an event on Sepolia.
-3. Open the event from another wallet.
-4. Cast a vote on-chain.
-5. Verify the transaction on Sepolia Etherscan.
+- Contract storage records **whether** a wallet voted, not which option it chose in a way organizers can read from a simple `getVoteRecord`-style API.
+- `VoteCast` logs are shaped so indexers cannot recover the choice from logs alone.
+- **Aggregate vote counts** remain public on-chain.
+- **Limitation:** Transaction calldata and `msg.sender` are public; a block explorer can still link a wallet to a choice for a given transaction. Stronger anonymity would require additional cryptography or relay patterns.
 
-### Restricted Allowlist Event
+---
 
-1. Create a restricted event with explicit wallet addresses.
-2. Only allowlisted wallets can vote.
-3. Final votes are submitted on-chain.
+## Known gaps
 
-### Private Invite Event
+- Full live Sepolia end-to-end QA depends on your deployment and funded keys.
+- Wallet import/recovery flows may be incomplete.
+- Organizer authentication on invite endpoints can be hardened.
+- Frontend bundle size could be improved (for example code splitting).
 
-1. Create a restricted event using the invite-token mode.
-2. Organizer generates invite tokens from the event page.
-3. Voter connects a wallet and registers using an invite token.
-4. Backend validates the invite and authorizes that wallet on-chain.
-5. Voter submits the final vote directly on Sepolia from that wallet.
+---
 
-## Verification Status
+## Repo checks
 
-The repo has been checked with:
-
-- `npm run build`
-- `npm run backend:build`
-- `npm run contracts:test`
-
-Live Sepolia verification still needs to be done with real deployed credentials and funded wallets.
-
-## Known Gaps
-
-- Full live Sepolia end-to-end QA still needs to be completed after deployment
-- Wallet import/recovery flow is still incomplete
-- Organizer/admin authentication on backend invite endpoints can be strengthened further
-- The frontend bundle is still large and could be code-split
+The tree has been exercised with `npm run build`, `npm run backend:build`, and `npm run contracts:test` at various points; rerun after your own changes.

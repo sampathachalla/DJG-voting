@@ -69,7 +69,7 @@ export default function Signup() {
 
     try {
       await unlockInternalWallet(walletRecord, password, { refreshState: false });
-      navigate("/dashboard");
+      navigate("/vote");
     } catch (unlockError) {
       setError(unlockError instanceof Error ? unlockError.message : "Wallet created but unlock failed.");
     }
@@ -94,7 +94,7 @@ export default function Signup() {
           <p className="mt-5 text-sm text-slate-400">Public address: {walletRecord.walletAddress}</p>
           {error ? <p className="mt-5 rounded-2xl border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-200">{error}</p> : null}
           <button onClick={() => void continueToDashboard()} className="mt-8 rounded-full bg-cyan-400 px-6 py-3 font-bold text-slate-950">
-            I saved it. Continue to dashboard
+            I saved it. Continue to the app
           </button>
         </div>
       </div>

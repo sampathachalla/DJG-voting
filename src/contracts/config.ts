@@ -1,5 +1,8 @@
 import type { AppTestnet, ContractConfig } from "../types/voting";
 
+/** Default Sepolia JSON-RPC used when `VITE_SEPOLIA_RPC_URL` is unset and as a read fallback when a custom RPC fails (e.g. rate limits). */
+export const SEPOLIA_PUBLIC_RPC_FALLBACK = "https://ethereum-sepolia-rpc.publicnode.com";
+
 type TestnetDefinition = {
   networkLabel: string;
   chainId: number;
@@ -24,7 +27,7 @@ const getTestnetDefinitions = (): Record<AppTestnet, TestnetDefinition> => ({
     networkLabel: "Ethereum Sepolia",
     chainId: 11155111,
     nativeTokenSymbol: "ETH",
-    rpcUrl: (import.meta.env.VITE_SEPOLIA_RPC_URL as string | undefined) ?? "https://rpc.sepolia.org",
+    rpcUrl: (import.meta.env.VITE_SEPOLIA_RPC_URL as string | undefined) ?? SEPOLIA_PUBLIC_RPC_FALLBACK,
     explorerBaseUrl:
       (import.meta.env.VITE_SEPOLIA_BLOCK_EXPLORER_BASE_URL as string | undefined) ??
       (import.meta.env.VITE_BLOCK_EXPLORER_BASE_URL as string | undefined) ??
@@ -81,6 +84,21 @@ export const hasVotingContractAddress = (network: AppTestnet = getDefaultTestnet
 export const hasCustomRpcUrl = (network: AppTestnet): boolean => {
   const envKey = getTestnetDefinition(network).rpcEnvKey;
   return Boolean(import.meta.env[envKey as keyof ImportMetaEnv]);
+};
+
+/**
+ * URLs used for read-only RPC (balance, contract reads). When you set a custom
+ * `VITE_SEPOLIA_RPC_URL` (e.g. 1rpc) that rate-limits, we append
+ * {@link SEPOLIA_PUBLIC_RPC_FALLBACK} so `ethers.FallbackProvider` can succeed on the backup.
+ */
+export const getSepoliaReadRpcUrlCandidates = (): string[] => {
+  const raw = (import.meta.env.VITE_SEPOLIA_RPC_URL as string | undefined)?.trim();
+  const primary = raw || SEPOLIA_PUBLIC_RPC_FALLBACK;
+  const urls = [primary];
+  if (primary !== SEPOLIA_PUBLIC_RPC_FALLBACK) {
+    urls.push(SEPOLIA_PUBLIC_RPC_FALLBACK);
+  }
+  return urls;
 };
 
 export const getChainSwitchParams = (network: AppTestnet) => {

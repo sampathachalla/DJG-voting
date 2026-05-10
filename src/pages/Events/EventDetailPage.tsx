@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { getContractConfig } from "../../contracts/config";
 import {
   canWalletVoteInEvent,
@@ -9,11 +9,13 @@ import {
   getAllowedVoters,
   getEvent,
   getEventProposals,
+  getExplorerAddressUrl,
   getExplorerTxUrl,
   getPrivateEventSummary,
   getVoteRecord,
   registerWalletWithInviteToken,
 } from "../../services";
+import { ParticipationEventCompactSummary } from "../../components/ParticipationPanel";
 import { useWallet } from "../../hooks/useWallet";
 import type { PrivateVotingEventSummary } from "../../services/privateVotingService";
 import type { VoteRecord, VotingEventMode, VotingEventSummary, VotingProposal } from "../../types/voting";
@@ -83,6 +85,8 @@ const isMissingPrivateBackendRecord = (message: string): boolean =>
 
 export default function EventDetailPage() {
   const { eventId } = useParams();
+  const location = useLocation();
+  const isObserveMode = location.pathname.startsWith("/observe");
   const [searchParams] = useSearchParams();
   const parsedEventId = Number(eventId);
   const { signer, walletAddress, walletSource, activeNetwork, isCorrectNetwork, balance, setActiveNetwork } = useWallet();
@@ -110,7 +114,7 @@ export default function EventDetailPage() {
   const [generatedInviteTokens, setGeneratedInviteTokens] = useState<string[]>([]);
 
   const setupInvitesRequested = searchParams.get("setupInvites") === "1";
-  const usesPrivateInviteFlow = !!event && !event.isPublic && event.allowedVoterCount === 0;
+  const usesPrivateInviteFlow = !!event && !event.isPublic && (!!privateSummary || event.allowedVoterCount === 0);
 
   useEffect(() => {
     if (!votingState) {
@@ -139,22 +143,26 @@ export default function EventDetailPage() {
       setEvent(loadedEvent);
       setProposals(loadedProposals);
 
-      const isPrivateInviteEvent = !loadedEvent.isPublic && loadedEvent.allowedVoterCount === 0;
+      let loadedPrivateSummary: PrivateVotingEventSummary | null = null;
 
-      if (isPrivateInviteEvent) {
-        setAllowedVoters([]);
-
+      if (!loadedEvent.isPublic) {
         try {
-          setPrivateSummary(await getPrivateEventSummary(parsedEventId, contractConfig.address));
+          loadedPrivateSummary = await getPrivateEventSummary(parsedEventId, contractConfig.address);
         } catch (privateError) {
           const message = privateError instanceof Error ? privateError.message : "Unable to load the private voting backend state.";
 
-          if (isMissingPrivateBackendRecord(message)) {
-            setPrivateSummary(null);
-          } else {
+          if (!isMissingPrivateBackendRecord(message)) {
             throw privateError;
           }
         }
+      }
+
+      setPrivateSummary(loadedPrivateSummary);
+
+      const isPrivateInviteEvent = !loadedEvent.isPublic && (!!loadedPrivateSummary || loadedEvent.allowedVoterCount === 0);
+
+      if (isPrivateInviteEvent) {
+        setAllowedVoters([]);
 
         if (walletAddress) {
           const [allowedToVote, records] = await Promise.all([
@@ -317,7 +325,7 @@ export default function EventDetailPage() {
       });
       setInviteTokenInput("");
       setTransactionLabel(`View private voter authorization on ${contractConfig.networkLabel} explorer`);
-      setTransactionHash(result.authorizationTxHash);
+      setTransactionHash(result.authorizationTxHash ?? "");
       setSuccessMessage(
         result.alreadyRegistered
           ? "This wallet was already registered for the private event. You can vote on-chain from this wallet."
@@ -391,7 +399,7 @@ export default function EventDetailPage() {
     <PageShell>
       {event ? (
         <>
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-8">
+          <div className="rounded-2xl border border-white/40 bg-white/40 p-5 shadow-sm backdrop-blur-md md:p-6">
             <div className="flex flex-wrap items-center gap-3">
               <span className="rounded-full bg-cyan-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">{getModeLabel(event.mode)}</span>
               <span className="rounded-full bg-white/70 px-3 py-1 text-xs uppercase tracking-[0.2em] text-[#5c5277]">{event.proposalCount} {getItemCountLabel(event)}</span>
@@ -410,14 +418,39 @@ export default function EventDetailPage() {
                 {eventStatus}
               </span>
             </div>
-            <h1 className="mt-4 text-4xl font-black text-[#2e2646]">{event.title}</h1>
+            <h1 className="mt-3 text-3xl font-black tracking-tight text-[#2e2646] md:text-4xl">{event.title}</h1>
             <p className="mt-3 max-w-3xl text-[#514769]">{event.description}</p>
             <div className="mt-5 grid gap-4 md:grid-cols-3 text-sm">
               <Meta label="Creator" value={event.creator} />
               <Meta label="Starts" value={formatDate(event.startTime)} />
               <Meta label="Ends" value={formatDate(event.endTime)} />
             </div>
-            {canDelete ? (
+            {isObserveMode ? <ParticipationEventCompactSummary event={event} /> : null}
+            {isObserveMode ? (
+              <p className="mt-4 text-sm">
+                <a
+                  href={getExplorerAddressUrl(event.creator, activeNetwork)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-[#7d3bba] underline"
+                >
+                  View creator address on block explorer
+                </a>
+              </p>
+            ) : null}
+            {!isObserveMode && walletSource === "internal" && walletAddress ? (
+              <p className="mt-4 rounded-xl border border-sky-200/80 bg-sky-50/90 p-3 text-sm text-sky-950">
+                You are signed in with the <strong>in-app wallet</strong>. Votes are sent from that wallet over Sepolia, so they will{" "}
+                <strong>not</strong> appear under MetaMask Activity. Use the transaction link on this page after you vote.
+              </p>
+            ) : null}
+            {!isObserveMode && walletSource === "metamask" && walletAddress ? (
+              <p className="mt-4 rounded-xl border border-violet-200/80 bg-violet-50/90 p-3 text-sm text-violet-950">
+                Confirm votes in <strong>MetaMask</strong>, then open the <strong>Activity</strong> tab with <strong>{contractConfig.networkLabel}</strong> selected—
+                transactions on other networks will not show here.
+              </p>
+            ) : null}
+            {!isObserveMode && canDelete ? (
               <div className="mt-6">
                 <button
                   type="button"
@@ -430,29 +463,29 @@ export default function EventDetailPage() {
               </div>
             ) : null}
             {isCreator && event.isActive && totalVotes > 0 ? (
-              <p className="mt-6 rounded-[1.5rem] border border-amber-300/50 bg-amber-50/80 p-4 text-sm text-amber-900 backdrop-blur-xl">
+              <p className="mt-6 rounded-xl border border-amber-300/50 bg-amber-50/80 p-4 text-sm text-amber-900 backdrop-blur-xl">
                 This event can no longer be deleted because votes have already been recorded on-chain.
               </p>
             ) : null}
             {!event.isActive ? (
-              <p className="mt-6 rounded-[1.5rem] border border-amber-300/50 bg-amber-50/80 p-4 text-sm text-amber-900 backdrop-blur-xl">
+              <p className="mt-6 rounded-xl border border-amber-300/50 bg-amber-50/80 p-4 text-sm text-amber-900 backdrop-blur-xl">
                 This event has been canceled on-chain and can no longer accept votes.
               </p>
             ) : null}
             {eventStatus === "Upcoming" ? (
-              <p className="mt-6 rounded-[1.5rem] border border-sky-300/50 bg-sky-50/80 p-4 text-sm text-sky-900 backdrop-blur-xl">
+              <p className="mt-6 rounded-xl border border-sky-300/50 bg-sky-50/80 p-4 text-sm text-sky-900 backdrop-blur-xl">
                 This event has not started yet. Voting will open at {formatDate(event.startTime)}.
               </p>
             ) : null}
             {eventStatus === "Ended" ? (
-              <p className="mt-6 rounded-[1.5rem] border border-amber-300/50 bg-amber-50/80 p-4 text-sm text-amber-900 backdrop-blur-xl">
+              <p className="mt-6 rounded-xl border border-amber-300/50 bg-amber-50/80 p-4 text-sm text-amber-900 backdrop-blur-xl">
                 Voting for this event has ended. The results remain visible for history and verification.
               </p>
             ) : null}
-            {!isCorrectNetwork && walletSource === "metamask" ? (
-              <div className="mt-6 rounded-[1.5rem] border border-red-300/50 bg-red-50/80 p-4 text-sm text-red-700 backdrop-blur-xl">
-                <p className="font-semibold">MetaMask is connected to a different network.</p>
-                <p className="mt-1">Switch MetaMask to {contractConfig.networkLabel} to vote in this event.</p>
+            {!isObserveMode && !isCorrectNetwork && (walletSource === "metamask" || walletSource === "coinbase") ? (
+              <div className="mt-6 rounded-xl border border-red-300/50 bg-red-50/80 p-4 text-sm text-red-700 backdrop-blur-xl">
+                <p className="font-semibold">Your browser wallet is on a different network.</p>
+                <p className="mt-1">Switch to {contractConfig.networkLabel} in your wallet to vote in this event.</p>
                 <button
                   type="button"
                   onClick={() => void switchToVotingNetwork()}
@@ -464,12 +497,29 @@ export default function EventDetailPage() {
               </div>
             ) : null}
             {!event.isPublic && usesPrivateInviteFlow ? (
-              <div className="mt-6 rounded-[1.5rem] border border-white/40 bg-white/70 p-4 text-sm text-[#514769] backdrop-blur-xl">
+              <div className="mt-6 rounded-xl border border-white/40 bg-white/70 p-4 text-sm text-[#514769] backdrop-blur-xl">
                 <p className="font-semibold text-[#2e2646]">Private invited voting event</p>
                 <p className="mt-2">
                   This event uses invite-token registration. The backend validates invite tokens and authorizes registered wallets on Sepolia, then each voter still casts their own on-chain vote from their wallet.
                 </p>
-                {isCreator ? (
+                {isObserveMode ? (
+                  <div className="mt-5 space-y-4">
+                    <p className="rounded-xl border border-sky-200/80 bg-sky-50/90 p-3 text-sm text-sky-950">
+                      Observer mode shows on-chain vote totals only. Token issuance and voter registration require signing in under <strong>Vote</strong> or{" "}
+                      <strong>Organize</strong>.
+                    </p>
+                    {privateSummary ? (
+                      <div className="grid gap-4 md:grid-cols-4">
+                        <Meta label="Invites issued" value={String(privateSummary.inviteCount ?? 0)} />
+                        <Meta label="Invites used" value={String(privateSummary.usedInviteCount ?? 0)} />
+                        <Meta label="Registered wallets" value={String(privateSummary.registeredWalletCount ?? 0)} />
+                        <Meta label="Votes cast (on-chain)" value={String(totalVotes)} />
+                      </div>
+                    ) : (
+                      <p className="text-sm text-[#5c5277]">Backend summary is not available; vote totals per proposal still reflect on-chain state below.</p>
+                    )}
+                  </div>
+                ) : isCreator ? (
                   <div className="mt-5 space-y-4">
                     <div className="grid gap-4 md:grid-cols-4">
                       <Meta label="Invites issued" value={String(privateSummary?.inviteCount ?? 0)} />
@@ -477,7 +527,7 @@ export default function EventDetailPage() {
                       <Meta label="Registered wallets" value={String(privateSummary?.registeredWalletCount ?? 0)} />
                       <Meta label="Votes cast" value={String(totalVotes)} />
                     </div>
-                    <div className={`rounded-[1.25rem] border p-4 text-sm ${setupInvitesRequested ? "border-purple-300 bg-purple-50/70" : "border-white/40 bg-[#f6f2fa]/80"}`}>
+                    <div className={`rounded-xl border p-4 text-sm ${setupInvitesRequested ? "border-purple-300 bg-purple-50/70" : "border-white/40 bg-[#f6f2fa]/80"}`}>
                       <p className="font-semibold text-[#2e2646]">Generate invite tokens</p>
                       <p className="mt-2 text-[#5c5277]">
                         Create one-time invite tokens and share them with the intended voters. The plain tokens are shown only once, so copy them before leaving this page.
@@ -494,12 +544,12 @@ export default function EventDetailPage() {
                         type="button"
                         onClick={() => void issueInviteTokens()}
                         disabled={issuingInvites || !signer || !walletAddress}
-                        className="mt-4 rounded-full bg-[#8b46cd] px-5 py-3 text-sm font-bold text-white shadow-[0_12px_24px_rgba(139,70,205,0.28)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="mt-4 rounded-full bg-[#8b46cd] px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-purple-600/20 transition disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {issuingInvites ? "Generating invite tokens..." : "Generate invite tokens"}
                       </button>
                       {generatedInviteTokens.length > 0 ? (
-                        <div className="mt-4 rounded-[1.25rem] border border-white/40 bg-white/80 p-4">
+                        <div className="mt-4 rounded-xl border border-white/40 bg-white/80 p-4">
                           <p className="text-sm font-semibold text-[#2e2646]">Generated invite tokens</p>
                           <textarea
                             readOnly
@@ -535,7 +585,7 @@ export default function EventDetailPage() {
                     </div>
                     {!isRegisteredInviteVoter ? (
                       privateSummary ? (
-                        <div className="rounded-[1.25rem] border border-white/40 bg-[#f6f2fa]/80 p-4">
+                        <div className="rounded-xl border border-white/40 bg-[#f6f2fa]/80 p-4">
                           <Field label="Invite token">
                             <input
                               value={inviteTokenInput}
@@ -548,18 +598,18 @@ export default function EventDetailPage() {
                             type="button"
                             onClick={() => void registerForPrivateEvent()}
                             disabled={registeringWallet || !walletAddress || !signer}
-                            className="mt-4 rounded-full bg-[#8b46cd] px-5 py-3 text-sm font-bold text-white shadow-[0_12px_24px_rgba(139,70,205,0.28)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="mt-4 rounded-full bg-[#8b46cd] px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-purple-600/20 transition disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {registeringWallet ? "Registering wallet..." : "Register wallet with invite token"}
                           </button>
                         </div>
                       ) : (
-                        <p className="rounded-[1.25rem] border border-amber-300/50 bg-amber-50/80 p-4 text-sm text-amber-900">
+                        <p className="rounded-xl border border-amber-300/50 bg-amber-50/80 p-4 text-sm text-amber-900">
                           The organizer has not issued any invite tokens for this event yet.
                         </p>
                       )
                     ) : (
-                      <p className="rounded-[1.25rem] border border-emerald-300/50 bg-emerald-50/80 p-4 text-sm text-emerald-900">
+                      <p className="rounded-xl border border-emerald-300/50 bg-emerald-50/80 p-4 text-sm text-emerald-900">
                         This wallet is registered for the private event. Your vote will be sent directly to {contractConfig.networkLabel}.
                       </p>
                     )}
@@ -568,51 +618,77 @@ export default function EventDetailPage() {
               </div>
             ) : null}
             {!event.isPublic && !usesPrivateInviteFlow ? (
-              <div className="mt-6 rounded-[1.5rem] border border-white/40 bg-white/70 p-4 text-sm text-[#514769] backdrop-blur-xl">
+              <div className="mt-6 rounded-xl border border-white/40 bg-white/70 p-4 text-sm text-[#514769] backdrop-blur-xl">
                 <p className="font-semibold text-[#2e2646]">Restricted voting event</p>
                 <p className="mt-2">Only allowlisted wallets can vote in this event.</p>
-                <div className="mt-4">
-                  {walletAddress ? (
-                    <div
-                      className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-bold ${
-                        canCurrentWalletVote ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-700"
-                      }`}
-                    >
-                      {canCurrentWalletVote ? "You are allowed to vote" : "You are not allowed to vote"}
+                {isObserveMode ? (
+                  <p className="mt-4 rounded-xl border border-white/40 bg-[#f6f2fa]/80 p-3 text-sm text-[#5c5277]">
+                    The allowlist is enforced on-chain. Use <strong>Vote</strong> after connecting a wallet to see whether your address may participate.
+                  </p>
+                ) : (
+                  <>
+                    <div className="mt-4">
+                      {walletAddress ? (
+                        <div
+                          className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-bold ${
+                            canCurrentWalletVote ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-700"
+                          }`}
+                        >
+                          {canCurrentWalletVote ? "You are allowed to vote" : "You are not allowed to vote"}
+                        </div>
+                      ) : (
+                        <div className="inline-flex items-center rounded-full bg-sky-100 px-4 py-2 text-sm font-bold text-sky-800">
+                          Connect a wallet to check whether you can vote
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="inline-flex items-center rounded-full bg-sky-100 px-4 py-2 text-sm font-bold text-sky-800">
-                      Connect a wallet to check whether you can vote
-                    </div>
-                  )}
-                </div>
-                {allowedVoters.length > 0 ? (
-                  <div className="mt-3">
-                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#5c5277]">Allowed wallets</p>
-                    <div className="mt-2 space-y-2">
-                      {allowedVoters.map((address) => (
-                        <p key={address} className="break-all rounded-2xl bg-[#f6f2fa] px-3 py-2 text-sm text-[#2e2646]">
-                          {address}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
+                    {allowedVoters.length > 0 ? (
+                      <div className="mt-3">
+                        <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#5c5277]">Allowed wallets</p>
+                        <div className="mt-2 space-y-2">
+                          {allowedVoters.map((address) => (
+                            <p key={address} className="break-all rounded-2xl bg-[#f6f2fa] px-3 py-2 text-sm text-[#2e2646]">
+                              {address}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
             ) : null}
           </div>
 
-          <div className="mt-8 grid gap-6">
+          <div className="mt-6 grid gap-4">
             {proposals.map((proposal) => {
               const voteRecord = voteRecords[proposal.id];
 
               return (
-                <article key={proposal.id} className="rounded-[2rem] border border-white/40 bg-[#f6f2fa]/80 p-6 shadow-[0_20px_50px_rgba(46,38,70,0.1)] backdrop-blur-xl">
-                  <h2 className="text-2xl font-black text-[#2e2646]">{proposal.title}</h2>
+                <article key={proposal.id} className="rounded-2xl border border-white/45 bg-[#f6f2fa]/85 p-4 shadow-md shadow-[rgba(46,38,70,0.06)] backdrop-blur-xl md:p-5">
+                  <h2 className="text-xl font-black tracking-tight text-[#2e2646] md:text-2xl">{proposal.title}</h2>
                   <p className="mt-2 text-[#514769]">{proposal.description}</p>
-                  <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  {voteRecord?.hasVoted ? (
+                    <p className="mt-2 text-xs text-[#5c5277]">
+                      You have submitted a vote for this question. The chain stores totals only, not which option you chose, so this page does not highlight a
+                      choice after voting.
+                    </p>
+                  ) : null}
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
                     {proposal.options.map((option, optionIndex) => {
                       const displayedVoteCount = proposal.voteCounts[optionIndex] ?? "0";
+
+                      if (isObserveMode) {
+                        return (
+                          <div
+                            key={`${proposal.id}-${optionIndex}`}
+                            className="rounded-xl border border-white/45 bg-white/75 p-4 text-left"
+                          >
+                            <p className="font-bold text-[#2e2646]">{option}</p>
+                            <p className="mt-2 text-sm text-[#514769]">On-chain votes: {displayedVoteCount}</p>
+                          </div>
+                        );
+                      }
 
                       return (
                         <button
@@ -627,7 +703,7 @@ export default function EventDetailPage() {
                             !isCorrectNetwork
                           }
                           onClick={() => void submitVote(proposal.id, optionIndex)}
-                          className="rounded-[1.5rem] border border-white/40 bg-white/70 p-5 text-left transition hover:-translate-y-1 hover:border-purple-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70"
+                          className="rounded-xl border border-white/45 bg-white/75 p-4 text-left transition hover:border-purple-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-70"
                         >
                           <p className="font-bold text-[#2e2646]">{option}</p>
                           <p className="mt-2 text-sm text-[#514769]">Votes: {displayedVoteCount}</p>
@@ -636,7 +712,6 @@ export default function EventDetailPage() {
                               Submitting vote... {voteElapsedSeconds}s
                             </p>
                           ) : null}
-                          {voteRecord?.optionIndex === optionIndex ? <p className="mt-3 text-xs uppercase tracking-[0.2em] text-[#7d3bba]">Your recorded vote</p> : null}
                         </button>
                       );
                     })}
@@ -647,7 +722,7 @@ export default function EventDetailPage() {
           </div>
 
           {votingState ? (
-            <p className="mt-6 rounded-[1.5rem] border border-purple-200/60 bg-white/70 p-4 text-sm text-[#5c5277] backdrop-blur-xl">
+            <p className="mt-6 rounded-xl border border-purple-200/60 bg-white/70 p-4 text-sm text-[#5c5277] backdrop-blur-xl">
               Sending your vote to {contractConfig.networkLabel}. Elapsed time:{" "}
               <span className="font-bold text-[#2e2646]">{voteElapsedSeconds}s</span>
             </p>
@@ -658,8 +733,8 @@ export default function EventDetailPage() {
               {transactionLabel}
             </a>
           ) : null}
-          {successMessage ? <p className="mt-6 rounded-[1.5rem] border border-emerald-300/50 bg-emerald-50/80 p-4 text-sm text-emerald-800 backdrop-blur-xl">{successMessage}</p> : null}
-          {error ? <p className="mt-6 rounded-[1.5rem] border border-red-300/50 bg-red-50/80 p-4 text-sm text-red-700 backdrop-blur-xl">{error}</p> : null}
+          {successMessage ? <p className="mt-6 rounded-xl border border-emerald-300/50 bg-emerald-50/80 p-4 text-sm text-emerald-800 backdrop-blur-xl">{successMessage}</p> : null}
+          {error ? <p className="mt-6 rounded-xl border border-red-300/50 bg-red-50/80 p-4 text-sm text-red-700 backdrop-blur-xl">{error}</p> : null}
         </>
       ) : null}
     </PageShell>
@@ -668,11 +743,17 @@ export default function EventDetailPage() {
 
 function PageShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#e0eff0] px-6 py-10 text-[#2e2646] md:px-12">
+    <div className="relative min-h-full overflow-x-hidden bg-[#e0eff0] px-4 py-6 text-[#2e2646] md:px-8 md:py-7">
       <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, #dceef4 0%, #b8cde4 25%, #cbcae4 70%, #9fcce1 100%)" }} />
       <div className="absolute top-[-140px] left-[-220px] h-[760px] w-[760px] rounded-full bg-purple-300/70 blur-[140px] mix-blend-multiply" />
       <div className="absolute bottom-[-140px] right-[-180px] h-[560px] w-[560px] rounded-full bg-teal-200/80 blur-[120px] mix-blend-multiply" />
-      <div className="absolute inset-0 opacity-15" style={{ backgroundImage: "linear-gradient(#4d5a8c 1px, transparent 1px), linear-gradient(90deg, #4d5a8c 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
+      <div
+        className="absolute inset-0 opacity-[0.06]"
+        style={{
+          backgroundImage: "linear-gradient(#4d5a8c 1px, transparent 1px), linear-gradient(90deg, #4d5a8c 1px, transparent 1px)",
+          backgroundSize: "48px 48px",
+        }}
+      />
       <div className="relative mx-auto max-w-6xl">{children}</div>
     </div>
   );

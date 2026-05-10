@@ -26,6 +26,8 @@ export interface InviteRecord {
   tokenHash: string;
   issuedByWallet: string;
   expiresAt: string | null;
+  reservedAt: string | null;
+  reservedByWallet: string | null;
   usedAt: string | null;
   usedByWallet: string | null;
   authorizationTxHash: string | null;
@@ -39,6 +41,7 @@ export interface RegistrationRecord {
   walletAddress: string;
   inviteTokenHash: string;
   registeredAt: string;
-  authorizationTxHash: string;
+  authorizationStatus: "pending" | "authorized";
+  authorizationTxHash: string | null;
   updatedAt: string;
 }

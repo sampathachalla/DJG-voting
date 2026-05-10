@@ -1,7 +1,7 @@
 export interface FirebaseUserProfile {
   email?: string | null;
   walletAddress: string;
-  walletSource?: "internal" | "metamask";
+  walletSource?: "internal" | "metamask" | "coinbase";
   createdAt?: string;
   updatedAt?: string;
 }

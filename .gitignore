@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 .env
+backend/.demo-private-voting-store.json
 contracts/artifacts
 contracts/cache
 contracts/typechain-types

@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import { HttpError } from "../errors.js";
 
 export const buildInviteCreationMessage = (payload: {
   eventId: number;
@@ -33,9 +34,15 @@ export const buildRegistrationMessage = (payload: {
   ].join("\n");
 
 export const assertSignedByWallet = (message: string, signature: string, walletAddress: string): void => {
-  const recovered = ethers.verifyMessage(message, signature);
+  let recovered: string;
+  try {
+    recovered = ethers.verifyMessage(message, signature);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Invalid signature.";
+    throw new HttpError(400, `Invalid signature: ${detail}`);
+  }
 
   if (recovered.toLowerCase() !== walletAddress.toLowerCase()) {
-    throw new Error("Signature does not match the provided wallet address.");
+    throw new HttpError(401, "Signature does not match the provided wallet address.");
   }
 };

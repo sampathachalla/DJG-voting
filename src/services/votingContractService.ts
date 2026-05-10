@@ -178,6 +178,16 @@ export const getAllowedVoters = async (eventId: number, network: AppTestnet): Pr
   return (await contract.getAllowedVoters(eventId)) as string[];
 };
 
+export const getEventVoteCount = async (eventId: number, network: AppTestnet): Promise<number> => {
+  if (!hasVotingContractAddress(network)) {
+    return 0;
+  }
+
+  const contract = getReadContract(network);
+  const count = (await contract.getEventVoteCount(eventId)) as bigint;
+  return Number(count);
+};
+
 export const getVoteRecord = async (
   eventId: number,
   proposalId: number,
@@ -185,16 +195,13 @@ export const getVoteRecord = async (
   network: AppTestnet,
 ): Promise<VoteRecord> => {
   if (!hasVotingContractAddress(network)) {
-    return { hasVoted: false, optionIndex: null };
+    return { hasVoted: false };
   }
 
   const contract = getReadContract(network);
-  const [hasVoted, optionIndex] = (await contract.getVoteRecord(eventId, proposalId, walletAddress)) as [boolean, bigint | number];
+  const voted = (await contract.getVoteRecord(eventId, proposalId, walletAddress)) as boolean;
 
-  return {
-    hasVoted,
-    optionIndex: hasVoted ? Number(optionIndex) : null,
-  };
+  return { hasVoted: voted };
 };
 
 export const createVotingEvent = async (

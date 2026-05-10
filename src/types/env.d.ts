@@ -14,6 +14,10 @@ interface ImportMetaEnv {
   readonly VITE_AMOY_BLOCK_EXPLORER_BASE_URL?: string;
   readonly VITE_VOTING_CONTRACT_ADDRESS?: string;
   readonly VITE_BLOCK_EXPLORER_BASE_URL?: string;
+  readonly VITE_ETHERSCAN_API_KEY?: string;
+  readonly VITE_SEPOLIA_ETHERSCAN_API_KEY?: string;
+  readonly VITE_AMOY_ETHERSCAN_API_KEY?: string;
+  readonly VITE_PRIVATE_VOTING_API_URL?: string;
 }
 
 interface ImportMeta {

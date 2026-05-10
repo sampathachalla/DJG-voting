@@ -9,7 +9,7 @@ import { getMetaMaskDeepLink } from "../services/sepoliaService";
 
 export default function Login() {
   const navigate = useNavigate();
-  const { unlockInternalWallet, connectMetaMask } = useWallet();
+  const { unlockInternalWallet, connectMetaMask, connectCoinbaseWallet } = useWallet();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,7 +31,7 @@ export default function Login() {
     try {
       setLoading(true);
       await unlockInternalWallet(account, password, { refreshState: false });
-      navigate("/dashboard");
+      navigate("/vote");
 
       void loginFirebaseAuthUser(account.email, password)
         .then(async () => {
@@ -57,13 +57,47 @@ export default function Login() {
     }
   };
 
+  const loginWithCoinbaseWallet = async (): Promise<void> => {
+    try {
+      setLoading(true);
+      setError("");
+      setWarning("");
+      const connectedWalletAddress = await connectCoinbaseWallet();
+      navigate("/vote");
+
+      void ensureFirebaseWalletSession()
+        .then(async () => {
+          await upsertFirebaseUserProfile({
+            walletAddress: connectedWalletAddress,
+            walletSource: "coinbase",
+          });
+        })
+        .catch((firestoreError) => {
+          const message =
+            firestoreError instanceof Error
+              ? firestoreError.message
+              : "Unable to store the Coinbase Wallet profile in Firestore.";
+
+          setWarning(
+            message === "Missing or insufficient permissions."
+              ? "Coinbase Wallet connected successfully, but Firestore does not currently allow writing the wallet profile."
+              : message,
+          );
+        });
+    } catch (connectError) {
+      setError(connectError instanceof Error ? connectError.message : "Unable to connect Coinbase Wallet.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const loginWithMetaMask = async (): Promise<void> => {
     try {
       setLoading(true);
       setError("");
       setWarning("");
       const connectedWalletAddress = await connectMetaMask();
-      navigate("/dashboard");
+      navigate("/vote");
 
       void ensureFirebaseWalletSession()
         .then(async () => {
@@ -112,7 +146,7 @@ export default function Login() {
             Your vote.<br />On Sepolia.<br />For free.
           </h2>
           <p className="text-purple-200 text-lg leading-relaxed max-w-sm">
-            Unlock your local wallet or connect MetaMask to create events, vote on proposals, and verify every transaction on-chain.
+            Unlock your local wallet or connect MetaMask or Coinbase Wallet to create events, vote on proposals, and verify every transaction on-chain.
           </p>
         </div>
         <p className="relative z-10 text-purple-200 text-sm">Firebase Auth is used for account sign-in. Private keys still never leave your browser.</p>
@@ -155,8 +189,15 @@ export default function Login() {
           <button onClick={() => void loginWithMetaMask()} disabled={loading} className="mt-5 w-full rounded-xl border border-purple-200 bg-[#f6f2fa] py-4 text-sm font-bold text-[#893ec8] disabled:opacity-60">
             Continue with MetaMask
           </button>
+          <button
+            onClick={() => void loginWithCoinbaseWallet()}
+            disabled={loading}
+            className="mt-3 w-full rounded-xl border border-sky-200 bg-sky-50/80 py-4 text-sm font-bold text-sky-900 disabled:opacity-60"
+          >
+            Continue with Coinbase Wallet
+          </button>
           <p className="mt-3 text-center text-xs leading-6 text-gray-500">
-            MetaMask handles its own unlock step. We request wallet access, then bring you back here to vote with that wallet address.
+            Browser wallets handle their own unlock step. We request wallet access, then you can vote with that address on-chain.
           </p>
         </div>
       </div>
